@@ -6,45 +6,40 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.Map;
+
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ApiResponse<T> {
 
     private boolean success;
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     private T data;
+    private String code;
+    private String message;
+    private Map<String, String> errors;
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    private ErrorResponse error;
-
-    private ApiResponse(T data) {
-        this.success = true;
+    private ApiResponse(boolean success, T data, String code, String message, Map<String, String> errors) {
+        this.success = success;
         this.data = data;
-    }
-
-    private ApiResponse(ErrorResponse error) {
-        this.success = false;
-        this.error = error;
+        this.code = code;
+        this.message = message;
+        this.errors = errors;
     }
 
     public static <T> ApiResponse<T> success(T data) {
-        return new ApiResponse<>(data);
+        return new ApiResponse<>(true, data, null, null, null);
     }
 
     public static <T> ApiResponse<T> success() {
-        return new ApiResponse<>((T) null);
+        return success(null);
     }
 
-    public static <T> ApiResponse<T> failure(ErrorCode errorCode) {
-        return new ApiResponse<>(ErrorResponse.of(errorCode));
+    public static <T> ApiResponse<T> error(ErrorCode errorCode) {
+        return new ApiResponse<>(false, null, errorCode.getCode(), errorCode.getMessage(), null);
     }
 
-    public static <T> ApiResponse<T> failure(ErrorCode errorCode, String message) {
-        return new ApiResponse<>(ErrorResponse.of(errorCode, message));
-    }
-
-    public static <T> ApiResponse<T> failure(ErrorResponse errorResponse) {
-        return new ApiResponse<>(errorResponse);
+    public static <T> ApiResponse<T> error(ErrorCode errorCode, Map<String, String> errors) {
+        return new ApiResponse<>(false, null, errorCode.getCode(), errorCode.getMessage(), errors);
     }
 }
