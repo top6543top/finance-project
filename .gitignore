@@ -1,5 +1,6 @@
-*.yml
-*.yaml
+application-local.yaml
+application-local.yml
+.omc/
 
 HELP.md
 .gradle
