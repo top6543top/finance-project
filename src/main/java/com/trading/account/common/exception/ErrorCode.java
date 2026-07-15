@@ -12,7 +12,11 @@ public enum ErrorCode {
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "C002", "지원하지 않는 HTTP 메서드입니다."),
     ENTITY_NOT_FOUND(HttpStatus.NOT_FOUND, "C003", "요청한 리소스를 찾을 수 없습니다."),
     DUPLICATE_RESOURCE(HttpStatus.CONFLICT, "C004", "이미 존재하는 리소스입니다."),
-    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "C005", "서버 내부 오류가 발생했습니다.");
+    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "C005", "서버 내부 오류가 발생했습니다."),
+    MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "C006", "회원을 찾을 수 없습니다."),
+    ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "C007", "계좌를 찾을 수 없습니다."),
+    INSUFFICIENT_BALANCE(HttpStatus.CONFLICT, "C008", "잔고가 부족합니다."),
+    SELF_TRANSFER_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "C009", "출금 계좌와 입금 계좌가 동일할 수 없습니다.");
 
     private final HttpStatus status;
     private final String code;
