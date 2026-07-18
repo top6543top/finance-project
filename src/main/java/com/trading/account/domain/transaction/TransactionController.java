@@ -2,13 +2,18 @@ package com.trading.account.domain.transaction;
 
 import com.trading.account.common.response.ApiResponse;
 import com.trading.account.domain.transaction.dto.DepositReqDto;
+import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
 import com.trading.account.domain.transaction.dto.TransferReqDto;
 import com.trading.account.domain.transaction.dto.TransferResDto;
 import com.trading.account.domain.transaction.dto.WithdrawReqDto;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.data.web.PagedModel;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -41,5 +46,15 @@ public class TransactionController {
     @PostMapping("/transfer")
     public ResponseEntity<ApiResponse<TransferResDto>> transfer(@Valid @RequestBody TransferReqDto request) {
         return ResponseEntity.ok(ApiResponse.success(transactionService.transfer(request)));
+    }
+
+    @GetMapping("/accounts/{accountNumber}/transactions")
+    public ResponseEntity<ApiResponse<PagedModel<TransactionHistoryResDto>>> getHistory(
+            @PathVariable String accountNumber,
+            @PageableDefault(size = 20) Pageable pageable
+    ) {
+        // Page를 그대로 직렬화하면 Pageable(Unpaged) 내부 필드에서 직렬화 오류 발생 -> PagedModel로 변환
+        PagedModel<TransactionHistoryResDto> response = new PagedModel<>(transactionService.getHistory(accountNumber, pageable));
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

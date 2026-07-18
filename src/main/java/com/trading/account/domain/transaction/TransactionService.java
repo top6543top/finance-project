@@ -4,11 +4,14 @@ import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
+import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
 import com.trading.account.domain.transaction.dto.TransferReqDto;
 import com.trading.account.domain.transaction.dto.TransferResDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
@@ -61,6 +64,13 @@ public class TransactionService {
 
         log.info("이체 완료: from={}, to={}, amount={}", mask(from.getAccountNumber()), mask(to.getAccountNumber()), request.amount());
         return new TransferResDto(from.getAccountNumber(), to.getAccountNumber(), request.amount(), history.getCreatedAt());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<TransactionHistoryResDto> getHistory(String accountNumber, Pageable pageable) {
+        Account account = getAccount(accountNumber);
+        return transactionHistoryRepository.findByAccount(account, pageable)
+                .map(TransactionHistoryResDto::from);
     }
 
     private Account getAccount(String accountNumber) {

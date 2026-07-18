@@ -5,6 +5,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.common.exception.GlobalExceptionHandler;
+import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
 import com.trading.account.domain.transaction.dto.TransferResDto;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,16 +13,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -41,6 +46,7 @@ class TransactionControllerTest {
         mockMvc = standaloneSetup(new TransactionController(transactionService))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+                .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
                 .build();
     }
 
@@ -86,5 +92,15 @@ class TransactionControllerTest {
                         .content("{\"fromAccountNumber\":\"111-111-1111\",\"toAccountNumber\":\"222-222-2222\",\"amount\":100}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.toAccountNumber").value("222-222-2222"));
+    }
+
+    @Test
+    void getHistory_found_returns200() throws Exception {
+        when(transactionService.getHistory(anyString(), any()))
+                .thenReturn(new PageImpl<TransactionHistoryResDto>(List.of()));
+
+        mockMvc.perform(get("/api/accounts/123-456-7890/transactions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content").isArray());
     }
 }
