@@ -6,6 +6,7 @@ import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.common.exception.GlobalExceptionHandler;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
+import com.trading.account.domain.transaction.dto.TransferResDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -73,5 +74,17 @@ class TransactionControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":999999}"))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void transfer_valid_returns200() throws Exception {
+        when(transactionService.transfer(any()))
+                .thenReturn(new TransferResDto("111-111-1111", "222-222-2222", BigDecimal.valueOf(100), LocalDateTime.now()));
+
+        mockMvc.perform(post("/api/transfer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"fromAccountNumber\":\"111-111-1111\",\"toAccountNumber\":\"222-222-2222\",\"amount\":100}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toAccountNumber").value("222-222-2222"));
     }
 }
