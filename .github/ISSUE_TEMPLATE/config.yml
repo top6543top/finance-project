@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/your-username/freemo-be/discussions
+    about: 일반적인 질문이나 토론을 위한 공간입니다
+  - name: 📧 이메일 문의
+    url: mailto:your-email@example.com
+    about: 개인적인 문의나 보안 관련 이슈는 이메일로 연락해주세요
