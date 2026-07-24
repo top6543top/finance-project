@@ -6,6 +6,7 @@ import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.member.Member;
 import com.trading.account.domain.member.MemberRepository;
+import com.trading.account.domain.transaction.dto.TransferReqDto;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -104,5 +105,66 @@ class TransactionConcurrencyTest {
                 BigDecimal.valueOf(10_000).subtract(withdrawAmount.multiply(BigDecimal.valueOf(successCount.get()))));
         // 재시도 덕분에 재현 테스트(재시도 없이 12/100 성공) 대비 성공률이 크게 개선됨
         assertThat(successCount.get()).isGreaterThanOrEqualTo(70);
+    }
+
+    // transfer()는 두 계좌(from, to)를 함께 잠그는데, A→B와 B→A가 동시에 일어나면 각자
+    // 반대 순서로 X-lock을 잡으려다 서로 물려 데드락이 날 수 있다(lock ordering deadlock).
+    // transfer() 내부에서 계좌번호를 정렬해 항상 같은 전역 순서로 잠그도록 고쳤는데,
+    // 이 테스트는 그 고침이 실제로 순환 대기를 없앴는지를 검증한다:
+    //   1) done.await 타임아웃 안에 전부 끝남 (데드락으로 영영 안 끝나는 상황이 아님)
+    //   2) 두 계좌 잔고 합이 처음과 동일 (돈이 새거나 중복 생성되지 않음)
+    //   3) 실패는 반드시 구조화된 CONCURRENT_UPDATE_CONFLICT(재시도 소진)뿐, 원본 DB 예외 누출 없음
+    @Test
+    void concurrentBidirectionalTransfer_noDeadlock_balanceSumStaysConsistent() throws InterruptedException {
+        Member memberA = memberRepository.save(new Member("김에이", "a@example.com"));
+        Member memberB = memberRepository.save(new Member("김비", "b@example.com"));
+        String accountA = "111-111-1111";
+        String accountB = "222-222-2222";
+        accountRepository.save(new Account(accountA, memberA));
+        accountRepository.save(new Account(accountB, memberB));
+        transactionService.deposit(accountA, BigDecimal.valueOf(100_000));
+        transactionService.deposit(accountB, BigDecimal.valueOf(100_000));
+
+        int transfersPerDirection = 50;
+        BigDecimal transferAmount = BigDecimal.valueOf(100);
+        ExecutorService executor = Executors.newFixedThreadPool(20);
+        CountDownLatch start = new CountDownLatch(1);
+        CountDownLatch done = new CountDownLatch(transfersPerDirection * 2);
+        List<Throwable> unexpectedFailures = new CopyOnWriteArrayList<>();
+
+        Runnable aToB = () -> runTransfer(accountA, accountB, transferAmount, start, done, unexpectedFailures);
+        Runnable bToA = () -> runTransfer(accountB, accountA, transferAmount, start, done, unexpectedFailures);
+        for (int i = 0; i < transfersPerDirection; i++) {
+            executor.submit(aToB);
+            executor.submit(bToA);
+        }
+
+        start.countDown();
+        boolean finishedInTime = done.await(30, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        // 데드락이 여전히 있었다면 재시도 5회를 반복 소진하며 지연되거나, 최악의 경우 여기서 타임아웃남
+        assertThat(finishedInTime).isTrue();
+        assertThat(unexpectedFailures).isEmpty();
+
+        BigDecimal balanceA = accountRepository.findByAccountNumber(accountA).orElseThrow().getBalance();
+        BigDecimal balanceB = accountRepository.findByAccountNumber(accountB).orElseThrow().getBalance();
+        assertThat(balanceA.add(balanceB)).isEqualByComparingTo(BigDecimal.valueOf(200_000));
+    }
+
+    private void runTransfer(String from, String to, BigDecimal amount, CountDownLatch start, CountDownLatch done,
+                              List<Throwable> unexpectedFailures) {
+        try {
+            start.await();
+            transactionService.transfer(new TransferReqDto(from, to, amount));
+        } catch (CustomException e) {
+            if (e.getErrorCode() != ErrorCode.CONCURRENT_UPDATE_CONFLICT) {
+                unexpectedFailures.add(e);
+            }
+        } catch (Exception e) {
+            unexpectedFailures.add(e);
+        } finally {
+            done.countDown();
+        }
     }
 }

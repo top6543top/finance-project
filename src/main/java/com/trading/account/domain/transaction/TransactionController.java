@@ -3,6 +3,8 @@ package com.trading.account.domain.transaction;
 import com.trading.account.common.response.ApiResponse;
 import com.trading.account.domain.transaction.dto.DepositReqDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
+import com.trading.account.domain.transaction.dto.TransferReqDto;
+import com.trading.account.domain.transaction.dto.TransferResDto;
 import com.trading.account.domain.transaction.dto.WithdrawReqDto;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -34,5 +36,12 @@ public class TransactionController {
             @Valid @RequestBody WithdrawReqDto request
     ) {
         return ResponseEntity.ok(ApiResponse.success(transactionService.withdraw(accountNumber, request.amount())));
+    }
+
+    @PostMapping("/transfer")
+    public ResponseEntity<ApiResponse<TransferResDto>> transfer(
+            @Valid @RequestBody TransferReqDto request
+    ) {
+        return ResponseEntity.ok(ApiResponse.success(transactionService.transfer(request)));
     }
 }

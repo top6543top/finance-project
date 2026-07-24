@@ -5,12 +5,15 @@ import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
+import com.trading.account.domain.transaction.dto.TransferReqDto;
+import com.trading.account.domain.transaction.dto.TransferResDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Recover;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
 
@@ -60,6 +63,45 @@ public class TransactionService {
     @Recover
     public TransactionResDto recoverDepositOrWithdraw(ConcurrencyFailureException e, String accountNumber, BigDecimal amount) {
         log.warn("동시성 충돌로 {}회 재시도 후에도 처리 실패: account={}", MAX_RETRY_ATTEMPTS, mask(accountNumber));
+        throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
+    }
+
+    // 이체는 두 계좌를 함께 다루는 원자적 작업이라 격리 수준을 REPEATABLE_READ로 명시:
+    // 이체 도중 다른 트랜잭션이 두 계좌 중 하나를 갱신해도 이 트랜잭션 내에서는
+    // 처음 조회한 잔고 값 기준으로 일관되게 차감/증액하도록 보장
+    @Transactional(isolation = Isolation.REPEATABLE_READ)
+    @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
+            backoff = @Backoff(delay = 50, multiplier = 2, random = true))
+    public TransferResDto transfer(TransferReqDto request) {
+        if (request.fromAccountNumber().equals(request.toAccountNumber())) {
+            throw new CustomException(ErrorCode.SELF_TRANSFER_NOT_ALLOWED);
+        }
+
+        // A→B 이체와 B→A 이체가 동시에 일어나면 각자 "요청에 적힌 from 먼저, to 나중" 순서로
+        // X-lock을 잡으려다 서로 반대 방향으로 물려 데드락이 난다(lock ordering deadlock,
+        // flushBeforeHistoryInsert()가 고친 S-lock/X-lock 문제와는 별개의 원인).
+        // 계좌번호 문자열 비교로 항상 같은 전역 순서로 조회해서 flush 순서를 고정하면,
+        // 이체 방향과 무관하게 모든 트랜잭션이 같은 순서로만 잠그게 되어 순환 대기 자체가 사라진다.
+        boolean fromFirst = request.fromAccountNumber().compareTo(request.toAccountNumber()) < 0;
+        Account first = getAccount(fromFirst ? request.fromAccountNumber() : request.toAccountNumber());
+        Account second = getAccount(fromFirst ? request.toAccountNumber() : request.fromAccountNumber());
+        Account from = fromFirst ? first : second;
+        Account to = fromFirst ? second : first;
+
+        from.withdraw(request.amount());
+        to.deposit(request.amount());
+        flushBeforeHistoryInsert();
+        TransactionHistory history = transactionHistoryRepository.save(
+                new TransactionHistory(from, to, request.amount(), TransactionType.TRANSFER));
+
+        log.info("이체 완료: from={}, to={}, amount={}", mask(from.getAccountNumber()), mask(to.getAccountNumber()), request.amount());
+        return new TransferResDto(from.getAccountNumber(), to.getAccountNumber(), request.amount(), history.getCreatedAt());
+    }
+
+    @Recover
+    public TransferResDto recoverTransfer(ConcurrencyFailureException e, TransferReqDto request) {
+        log.warn("동시성 충돌로 {}회 재시도 후에도 이체 실패: from={}, to={}",
+                MAX_RETRY_ATTEMPTS, mask(request.fromAccountNumber()), mask(request.toAccountNumber()));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
     }
 
