@@ -16,7 +16,8 @@ public enum ErrorCode {
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "C006", "회원을 찾을 수 없습니다."),
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "C007", "계좌를 찾을 수 없습니다."),
     INSUFFICIENT_BALANCE(HttpStatus.CONFLICT, "C008", "잔고가 부족합니다."),
-    SELF_TRANSFER_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "C009", "출금 계좌와 입금 계좌가 동일할 수 없습니다.");
+    SELF_TRANSFER_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "C009", "출금 계좌와 입금 계좌가 동일할 수 없습니다."),
+    CONCURRENT_UPDATE_CONFLICT(HttpStatus.CONFLICT, "C010", "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String code;
