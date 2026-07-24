@@ -4,12 +4,15 @@ import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
+import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
 import com.trading.account.domain.transaction.dto.TransferReqDto;
 import com.trading.account.domain.transaction.dto.TransferResDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Recover;
 import org.springframework.retry.annotation.Retryable;
@@ -103,6 +106,13 @@ public class TransactionService {
         log.warn("동시성 충돌로 {}회 재시도 후에도 이체 실패: from={}, to={}",
                 MAX_RETRY_ATTEMPTS, mask(request.fromAccountNumber()), mask(request.toAccountNumber()));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<TransactionHistoryResDto> getHistory(String accountNumber, Pageable pageable) {
+        Account account = getAccount(accountNumber);
+        return transactionHistoryRepository.findByAccount(account, pageable)
+                .map(TransactionHistoryResDto::from);
     }
 
     private Account getAccount(String accountNumber) {
