@@ -136,6 +136,9 @@ public class TransactionService {
 
     // 계좌번호 뒷자리만 남기고 마스킹 (금융 도메인 로그에 전체 계좌번호 노출 금지)
     private String mask(String accountNumber) {
+        if (accountNumber.length() < 4) {
+            return "***";
+        }
         return "***-***-" + accountNumber.substring(accountNumber.length() - 4);
     }
 }
