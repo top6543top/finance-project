@@ -8,6 +8,7 @@ import com.trading.account.domain.account.dto.AccountCreateResDto;
 import com.trading.account.domain.member.Member;
 import com.trading.account.domain.member.MemberRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,7 +28,12 @@ public class AccountService {
         Member member = memberRepository.findById(request.memberId())
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 
-        Account account = accountRepository.save(new Account(generateAccountNumber(), member));
+        Account account;
+        try {
+            account = accountRepository.save(new Account(generateAccountNumber(), member));
+        } catch (DataIntegrityViolationException e) {
+            throw new CustomException(ErrorCode.DUPLICATE_RESOURCE);
+        }
 
         return new AccountCreateResDto(
                 account.getId(), account.getAccountNumber(), account.getBalance(),
