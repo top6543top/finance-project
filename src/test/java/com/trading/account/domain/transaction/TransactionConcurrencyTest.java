@@ -55,7 +55,7 @@ class TransactionConcurrencyTest {
     //   3) 재시도 덕분에 성공률이 재현 테스트(재시도 없음, 12/100) 대비 크게 개선
     @Test
     void concurrentWithdraw_100Threads_balanceStaysConsistentAndFailuresAreStructured() throws InterruptedException {
-        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com"));
+        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
         accountRepository.save(new Account("999-999-9999", member));
         transactionService.deposit("999-999-9999", BigDecimal.valueOf(10_000));
 
@@ -116,8 +116,8 @@ class TransactionConcurrencyTest {
     //   3) 실패는 반드시 구조화된 CONCURRENT_UPDATE_CONFLICT(재시도 소진)뿐, 원본 DB 예외 누출 없음
     @Test
     void concurrentBidirectionalTransfer_noDeadlock_balanceSumStaysConsistent() throws InterruptedException {
-        Member memberA = memberRepository.save(new Member("김에이", "a@example.com"));
-        Member memberB = memberRepository.save(new Member("김비", "b@example.com"));
+        Member memberA = memberRepository.save(new Member("김에이", "a@example.com", "password123!"));
+        Member memberB = memberRepository.save(new Member("김비", "b@example.com", "password123!"));
         String accountA = "111-111-1111";
         String accountB = "222-222-2222";
         accountRepository.save(new Account(accountA, memberA));

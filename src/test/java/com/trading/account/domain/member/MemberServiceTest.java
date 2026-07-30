@@ -24,13 +24,17 @@ class MemberServiceTest {
     @Mock
     private MemberRepository memberRepository;
 
+    @Mock
+    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
     @InjectMocks
     private MemberService memberService;
 
     @Test
     void createMember_success_returnsCreatedMember() {
-        MemberCreateReqDto request = new MemberCreateReqDto("김유현", "yuhyun@example.com");
+        MemberCreateReqDto request = new MemberCreateReqDto("김유현", "yuhyun@example.com", "password123!");
         when(memberRepository.existsByEmail(request.email())).thenReturn(false);
+        when(passwordEncoder.encode(request.password())).thenReturn("encoded-password");
         when(memberRepository.save(any(Member.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         MemberCreateResDto response = memberService.createMember(request);
@@ -41,7 +45,7 @@ class MemberServiceTest {
 
     @Test
     void createMember_duplicateEmail_throwsCustomException() {
-        MemberCreateReqDto request = new MemberCreateReqDto("김유현", "dup@example.com");
+        MemberCreateReqDto request = new MemberCreateReqDto("김유현", "dup@example.com", "password123!");
         when(memberRepository.existsByEmail(request.email())).thenReturn(true);
 
         CustomException exception = catchThrowableOfType(
@@ -53,7 +57,7 @@ class MemberServiceTest {
 
     @Test
     void createMember_raceConditionOnUniqueConstraint_throwsCustomException() {
-        MemberCreateReqDto request = new MemberCreateReqDto("김유현", "dup@example.com");
+        MemberCreateReqDto request = new MemberCreateReqDto("김유현", "dup@example.com", "password123!");
         when(memberRepository.existsByEmail(request.email())).thenReturn(false);
         when(memberRepository.save(any(Member.class)))
                 .thenThrow(new DataIntegrityViolationException("unique violation"));

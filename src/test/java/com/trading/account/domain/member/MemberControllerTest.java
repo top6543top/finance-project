@@ -48,7 +48,7 @@ class MemberControllerTest {
 
         mockMvc.perform(post("/api/members")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"김유현\",\"email\":\"yuhyun@example.com\"}"))
+                        .content("{\"name\":\"김유현\",\"email\":\"yuhyun@example.com\",\"password\":\"password123!\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data.id").value(1));
@@ -58,7 +58,7 @@ class MemberControllerTest {
     void createMember_blankName_returns400() throws Exception {
         mockMvc.perform(post("/api/members")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"\",\"email\":\"yuhyun@example.com\"}"))
+                        .content("{\"name\":\"\",\"email\":\"yuhyun@example.com\",\"password\":\"password123!\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors.name").exists());
     }
@@ -70,7 +70,7 @@ class MemberControllerTest {
 
         mockMvc.perform(post("/api/members")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"김유현\",\"email\":\"dup@example.com\"}"))
+                        .content("{\"name\":\"김유현\",\"email\":\"dup@example.com\",\"password\":\"password123!\"}"))
                 .andExpect(status().isConflict());
     }
 }

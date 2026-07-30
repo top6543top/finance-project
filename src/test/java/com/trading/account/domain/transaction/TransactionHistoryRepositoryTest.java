@@ -38,7 +38,7 @@ class TransactionHistoryRepositoryTest {
 
     @Test
     void findByAccount_returnsDepositsAndWithdrawsAndTransfersInvolvingAccount() {
-        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com"));
+        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
         Account a = accountRepository.save(new Account("111-111-1111", member));
         Account b = accountRepository.save(new Account("222-222-2222", member));
 
