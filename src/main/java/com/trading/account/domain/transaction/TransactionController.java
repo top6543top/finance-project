@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,31 +30,39 @@ public class TransactionController {
     @PostMapping("/accounts/{accountNumber}/deposit")
     public ResponseEntity<ApiResponse<TransactionResDto>> deposit(
             @PathVariable String accountNumber,
-            @Valid @RequestBody DepositReqDto request
+            @Valid @RequestBody DepositReqDto request,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(ApiResponse.success(transactionService.deposit(accountNumber, request.amount())));
+        Long requesterId = (Long) authentication.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success(transactionService.deposit(accountNumber, requesterId, request.amount())));
     }
 
     @PostMapping("/accounts/{accountNumber}/withdraw")
     public ResponseEntity<ApiResponse<TransactionResDto>> withdraw(
             @PathVariable String accountNumber,
-            @Valid @RequestBody WithdrawReqDto request
+            @Valid @RequestBody WithdrawReqDto request,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(ApiResponse.success(transactionService.withdraw(accountNumber, request.amount())));
+        Long requesterId = (Long) authentication.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success(transactionService.withdraw(accountNumber, requesterId, request.amount())));
     }
 
     @PostMapping("/transfer")
     public ResponseEntity<ApiResponse<TransferResDto>> transfer(
-            @Valid @RequestBody TransferReqDto request
+            @Valid @RequestBody TransferReqDto request,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(ApiResponse.success(transactionService.transfer(request)));
+        Long requesterId = (Long) authentication.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success(transactionService.transfer(request, requesterId)));
     }
 
     @GetMapping("/accounts/{accountNumber}/transactions")
     public ResponseEntity<ApiResponse<Page<TransactionHistoryResDto>>> getHistory(
             @PathVariable String accountNumber,
-            Pageable pageable
+            Pageable pageable,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(ApiResponse.success(transactionService.getHistory(accountNumber, pageable)));
+        Long requesterId = (Long) authentication.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success(transactionService.getHistory(accountNumber, requesterId, pageable)));
     }
 }

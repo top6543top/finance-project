@@ -19,6 +19,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,7 +41,7 @@ class AccountServiceTest {
         when(accountRepository.existsByAccountNumber(any())).thenReturn(false);
         when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        AccountCreateResDto response = accountService.createAccount(new AccountCreateReqDto(1L));
+        AccountCreateResDto response = accountService.createAccount(new AccountCreateReqDto(1L), 1L);
 
         assertThat(response.accountNumber()).isNotBlank();
         assertThat(response.balance()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -51,18 +52,27 @@ class AccountServiceTest {
         when(memberRepository.findById(1L)).thenReturn(Optional.empty());
 
         CustomException exception = catchThrowableOfType(
-                () -> accountService.createAccount(new AccountCreateReqDto(1L)), CustomException.class);
+                () -> accountService.createAccount(new AccountCreateReqDto(1L), 1L), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MEMBER_NOT_FOUND);
     }
 
     @Test
+    void createAccount_notSelf_throwsAccessDenied() {
+        CustomException exception = catchThrowableOfType(
+                () -> accountService.createAccount(new AccountCreateReqDto(1L), 2L), CustomException.class);
+
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCESS_DENIED);
+    }
+
+    @Test
     void getBalance_found_returnsBalance() {
-        Member member = new Member("김유현", "yuhyun@example.com", "password123!");
-        Account account = new Account("123-456-7890", member);
+        Member owner = mock(Member.class);
+        when(owner.getId()).thenReturn(1L);
+        Account account = new Account("123-456-7890", owner);
         when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
 
-        AccountBalanceResDto response = accountService.getBalance("123-456-7890");
+        AccountBalanceResDto response = accountService.getBalance("123-456-7890", 1L);
 
         assertThat(response.accountNumber()).isEqualTo("123-456-7890");
         assertThat(response.balance()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -73,8 +83,21 @@ class AccountServiceTest {
         when(accountRepository.findByAccountNumber("000")).thenReturn(Optional.empty());
 
         CustomException exception = catchThrowableOfType(
-                () -> accountService.getBalance("000"), CustomException.class);
+                () -> accountService.getBalance("000", 1L), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND);
+    }
+
+    @Test
+    void getBalance_notOwner_throwsAccessDenied() {
+        Member owner = mock(Member.class);
+        when(owner.getId()).thenReturn(1L);
+        Account account = new Account("123-456-7890", owner);
+        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+
+        CustomException exception = catchThrowableOfType(
+                () -> accountService.getBalance("123-456-7890", 2L), CustomException.class);
+
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCESS_DENIED);
     }
 }

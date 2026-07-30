@@ -12,6 +12,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -43,13 +45,16 @@ class TransactionControllerTest {
                 .build();
     }
 
+    private static final Authentication AUTH = new UsernamePasswordAuthenticationToken(1L, null);
+
     @Test
     void deposit_valid_returns200() throws Exception {
-        when(transactionService.deposit(anyString(), any()))
+        when(transactionService.deposit(anyString(), any(), any()))
                 .thenReturn(new TransactionResDto("123-456-7890", BigDecimal.valueOf(1500), BigDecimal.valueOf(500),
                         TransactionType.DEPOSIT, LocalDateTime.now()));
 
         mockMvc.perform(post("/api/accounts/123-456-7890/deposit")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":500}"))
                 .andExpect(status().isOk())
@@ -59,6 +64,7 @@ class TransactionControllerTest {
     @Test
     void deposit_negativeAmount_returns400() throws Exception {
         mockMvc.perform(post("/api/accounts/123-456-7890/deposit")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":-1}"))
                 .andExpect(status().isBadRequest());
@@ -66,10 +72,11 @@ class TransactionControllerTest {
 
     @Test
     void withdraw_insufficientBalance_returns409() throws Exception {
-        when(transactionService.withdraw(anyString(), any()))
+        when(transactionService.withdraw(anyString(), any(), any()))
                 .thenThrow(new CustomException(ErrorCode.INSUFFICIENT_BALANCE));
 
         mockMvc.perform(post("/api/accounts/123-456-7890/withdraw")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":999999}"))
                 .andExpect(status().isConflict());

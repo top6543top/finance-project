@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -41,8 +42,9 @@ public class TransactionService {
 
     @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
             backoff = @Backoff(delay = 50, multiplier = 2, random = true))
-    public TransactionResDto deposit(String accountNumber, BigDecimal amount) {
+    public TransactionResDto deposit(String accountNumber, Long requesterId, BigDecimal amount) {
         Account account = getAccount(accountNumber);
+        validateOwner(account, requesterId);
         account.deposit(amount);
         flushBeforeHistoryInsert();
         TransactionHistory history = transactionHistoryRepository.save(
@@ -53,8 +55,9 @@ public class TransactionService {
 
     @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
             backoff = @Backoff(delay = 50, multiplier = 2, random = true))
-    public TransactionResDto withdraw(String accountNumber, BigDecimal amount) {
+    public TransactionResDto withdraw(String accountNumber, Long requesterId, BigDecimal amount) {
         Account account = getAccount(accountNumber);
+        validateOwner(account, requesterId);
         account.withdraw(amount);
         flushBeforeHistoryInsert();
         TransactionHistory history = transactionHistoryRepository.save(
@@ -64,7 +67,7 @@ public class TransactionService {
     }
 
     @Recover
-    public TransactionResDto recoverDepositOrWithdraw(ConcurrencyFailureException e, String accountNumber, BigDecimal amount) {
+    public TransactionResDto recoverDepositOrWithdraw(ConcurrencyFailureException e, String accountNumber, Long requesterId, BigDecimal amount) {
         log.warn("동시성 충돌로 {}회 재시도 후에도 처리 실패: account={}", MAX_RETRY_ATTEMPTS, mask(accountNumber));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
     }
@@ -74,7 +77,7 @@ public class TransactionService {
     // 감싸버린다. ACCOUNT_NOT_FOUND/INSUFFICIENT_BALANCE 같은 CustomException(비즈니스 예외,
     // 재시도 대상 아님)이 그렇게 원래 에러코드를 잃고 500으로 새는 걸 막기 위해 그대로 다시 던진다.
     @Recover
-    public TransactionResDto recoverBusinessException(CustomException e, String accountNumber, BigDecimal amount) {
+    public TransactionResDto recoverBusinessException(CustomException e, String accountNumber, Long requesterId, BigDecimal amount) {
         throw e;
     }
 
@@ -84,7 +87,7 @@ public class TransactionService {
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
             backoff = @Backoff(delay = 50, multiplier = 2, random = true))
-    public TransferResDto transfer(TransferReqDto request) {
+    public TransferResDto transfer(TransferReqDto request, Long requesterId) {
         if (request.fromAccountNumber().equals(request.toAccountNumber())) {
             throw new CustomException(ErrorCode.SELF_TRANSFER_NOT_ALLOWED);
         }
@@ -100,6 +103,9 @@ public class TransactionService {
         Account from = fromFirst ? first : second;
         Account to = fromFirst ? second : first;
 
+        // 이체는 출금 계좌(from)만 요청자 소유인지 검증 — 입금 계좌(to)는 상대방 소유가 당연하므로 검증 대상 아님 (IS-17)
+        validateOwner(from, requesterId);
+
         from.withdraw(request.amount());
         to.deposit(request.amount());
         flushBeforeHistoryInsert();
@@ -111,7 +117,7 @@ public class TransactionService {
     }
 
     @Recover
-    public TransferResDto recoverTransfer(ConcurrencyFailureException e, TransferReqDto request) {
+    public TransferResDto recoverTransfer(ConcurrencyFailureException e, TransferReqDto request, Long requesterId) {
         log.warn("동시성 충돌로 {}회 재시도 후에도 이체 실패: from={}, to={}",
                 MAX_RETRY_ATTEMPTS, mask(request.fromAccountNumber()), mask(request.toAccountNumber()));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
@@ -120,13 +126,14 @@ public class TransactionService {
     // 위 recoverBusinessException()과 같은 이유: transfer()의 SELF_TRANSFER_NOT_ALLOWED/
     // ACCOUNT_NOT_FOUND 같은 CustomException도 재시도 대상이 아니므로 그대로 다시 던진다.
     @Recover
-    public TransferResDto recoverTransferBusinessException(CustomException e, TransferReqDto request) {
+    public TransferResDto recoverTransferBusinessException(CustomException e, TransferReqDto request, Long requesterId) {
         throw e;
     }
 
     @Transactional(readOnly = true)
-    public Page<TransactionHistoryResDto> getHistory(String accountNumber, Pageable pageable) {
+    public Page<TransactionHistoryResDto> getHistory(String accountNumber, Long requesterId, Pageable pageable) {
         Account account = getAccount(accountNumber);
+        validateOwner(account, requesterId);
         return transactionHistoryRepository.findByAccount(account, pageable)
                 .map(TransactionHistoryResDto::from);
     }
@@ -134,6 +141,13 @@ public class TransactionService {
     private Account getAccount(String accountNumber) {
         return accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+    }
+
+    // 인증(로그인 여부)과 별개로, 로그인한 사용자가 "이 계좌"의 진짜 소유자인지 확인 (IS-17)
+    private void validateOwner(Account account, Long requesterId) {
+        if (!Objects.equals(account.getMember().getId(), requesterId)) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
     }
 
     // TransactionHistory는 IDENTITY 채번이라 save() 시점에 즉시 INSERT가 나가고, FK 제약 검사 때문에

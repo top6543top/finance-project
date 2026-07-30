@@ -13,6 +13,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -44,12 +46,15 @@ class AccountControllerTest {
                 .build();
     }
 
+    private static final Authentication AUTH = new UsernamePasswordAuthenticationToken(1L, null);
+
     @Test
     void createAccount_valid_returns201() throws Exception {
-        when(accountService.createAccount(any()))
+        when(accountService.createAccount(any(), any()))
                 .thenReturn(new AccountCreateResDto(1L, "123-456-7890", BigDecimal.ZERO, 1L, LocalDateTime.now()));
 
         mockMvc.perform(post("/api/accounts")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"memberId\":1}"))
                 .andExpect(status().isCreated())
@@ -59,6 +64,7 @@ class AccountControllerTest {
     @Test
     void createAccount_missingMemberId_returns400() throws Exception {
         mockMvc.perform(post("/api/accounts")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
@@ -66,20 +72,20 @@ class AccountControllerTest {
 
     @Test
     void getBalance_found_returns200() throws Exception {
-        when(accountService.getBalance("123-456-7890"))
+        when(accountService.getBalance("123-456-7890", 1L))
                 .thenReturn(new AccountBalanceResDto("123-456-7890", BigDecimal.TEN));
 
-        mockMvc.perform(get("/api/accounts/123-456-7890"))
+        mockMvc.perform(get("/api/accounts/123-456-7890").principal(AUTH))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.balance").value(10));
     }
 
     @Test
     void getBalance_notFound_returns404() throws Exception {
-        when(accountService.getBalance("000"))
+        when(accountService.getBalance("000", 1L))
                 .thenThrow(new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
 
-        mockMvc.perform(get("/api/accounts/000"))
+        mockMvc.perform(get("/api/accounts/000").principal(AUTH))
                 .andExpect(status().isNotFound());
     }
 }
