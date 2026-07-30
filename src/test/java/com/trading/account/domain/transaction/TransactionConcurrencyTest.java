@@ -57,7 +57,7 @@ class TransactionConcurrencyTest {
     void concurrentWithdraw_100Threads_balanceStaysConsistentAndFailuresAreStructured() throws InterruptedException {
         Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
         accountRepository.save(new Account("999-999-9999", member));
-        transactionService.deposit("999-999-9999", BigDecimal.valueOf(10_000));
+        transactionService.deposit("999-999-9999", member.getId(), BigDecimal.valueOf(10_000));
 
         int threadCount = 100;
         BigDecimal withdrawAmount = BigDecimal.valueOf(100);
@@ -72,7 +72,7 @@ class TransactionConcurrencyTest {
             executor.submit(() -> {
                 try {
                     start.await();
-                    transactionService.withdraw("999-999-9999", withdrawAmount);
+                    transactionService.withdraw("999-999-9999", member.getId(), withdrawAmount);
                     successCount.incrementAndGet();
                 } catch (CustomException e) {
                     if (e.getErrorCode() == ErrorCode.CONCURRENT_UPDATE_CONFLICT) {
@@ -122,8 +122,8 @@ class TransactionConcurrencyTest {
         String accountB = "222-222-2222";
         accountRepository.save(new Account(accountA, memberA));
         accountRepository.save(new Account(accountB, memberB));
-        transactionService.deposit(accountA, BigDecimal.valueOf(100_000));
-        transactionService.deposit(accountB, BigDecimal.valueOf(100_000));
+        transactionService.deposit(accountA, memberA.getId(), BigDecimal.valueOf(100_000));
+        transactionService.deposit(accountB, memberB.getId(), BigDecimal.valueOf(100_000));
 
         int transfersPerDirection = 50;
         BigDecimal transferAmount = BigDecimal.valueOf(100);
@@ -132,8 +132,8 @@ class TransactionConcurrencyTest {
         CountDownLatch done = new CountDownLatch(transfersPerDirection * 2);
         List<Throwable> unexpectedFailures = new CopyOnWriteArrayList<>();
 
-        Runnable aToB = () -> runTransfer(accountA, accountB, transferAmount, start, done, unexpectedFailures);
-        Runnable bToA = () -> runTransfer(accountB, accountA, transferAmount, start, done, unexpectedFailures);
+        Runnable aToB = () -> runTransfer(accountA, accountB, transferAmount, memberA.getId(), start, done, unexpectedFailures);
+        Runnable bToA = () -> runTransfer(accountB, accountA, transferAmount, memberB.getId(), start, done, unexpectedFailures);
         for (int i = 0; i < transfersPerDirection; i++) {
             executor.submit(aToB);
             executor.submit(bToA);
@@ -152,11 +152,11 @@ class TransactionConcurrencyTest {
         assertThat(balanceA.add(balanceB)).isEqualByComparingTo(BigDecimal.valueOf(200_000));
     }
 
-    private void runTransfer(String from, String to, BigDecimal amount, CountDownLatch start, CountDownLatch done,
+    private void runTransfer(String from, String to, BigDecimal amount, Long requesterId, CountDownLatch start, CountDownLatch done,
                               List<Throwable> unexpectedFailures) {
         try {
             start.await();
-            transactionService.transfer(new TransferReqDto(from, to, amount));
+            transactionService.transfer(new TransferReqDto(from, to, amount), requesterId);
         } catch (CustomException e) {
             if (e.getErrorCode() != ErrorCode.CONCURRENT_UPDATE_CONFLICT) {
                 unexpectedFailures.add(e);
