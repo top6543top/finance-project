@@ -32,7 +32,7 @@ class AccountRepositoryTest {
 
     @Test
     void save_persistsAccountWithZeroBalanceAndVersion() {
-        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com"));
+        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
 
         Account saved = accountRepository.save(new Account("123-456-7890", member));
 
@@ -43,7 +43,7 @@ class AccountRepositoryTest {
 
     @Test
     void findByAccountNumber_returnsAccount() {
-        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com"));
+        Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
         accountRepository.save(new Account("111-222-3333", member));
 
         assertThat(accountRepository.findByAccountNumber("111-222-3333")).isPresent();

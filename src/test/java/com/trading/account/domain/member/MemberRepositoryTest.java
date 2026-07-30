@@ -16,7 +16,7 @@ class MemberRepositoryTest {
 
     @Test
     void save_persistsMemberWithGeneratedId() {
-        Member member = new Member("김유현", "yuhyun@example.com");
+        Member member = new Member("김유현", "yuhyun@example.com", "password123!");
 
         Member saved = memberRepository.save(member);
 
@@ -27,10 +27,10 @@ class MemberRepositoryTest {
 
     @Test
     void save_duplicateEmail_violatesUniqueConstraint() {
-        memberRepository.saveAndFlush(new Member("A", "dup@example.com"));
+        memberRepository.saveAndFlush(new Member("A", "dup@example.com", "password123!"));
 
         assertThatThrownBy(() ->
-                memberRepository.saveAndFlush(new Member("B", "dup@example.com")))
+                memberRepository.saveAndFlush(new Member("B", "dup@example.com", "password123!")))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 }

@@ -33,7 +33,7 @@ class TransactionServiceTest {
     private TransactionService transactionService;
 
     private Account newAccount(String accountNumber) {
-        Member member = new Member("김유현", "yuhyun@example.com");
+        Member member = new Member("김유현", "yuhyun@example.com", "password123!");
         Account account = new Account(accountNumber, member);
         account.deposit(BigDecimal.valueOf(1000));
         return account;

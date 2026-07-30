@@ -25,12 +25,16 @@ public class Member {
     @Column(name = "name", nullable = false)
     private String name;
 
+    @Column(name = "password", nullable = false)
+    private String password;
+
     @CreatedDate
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    public Member(String name, String email) {
+    public Member(String name, String email, String password) {
         this.name = name;
         this.email = email;
+        this.password = password;
     }
 }

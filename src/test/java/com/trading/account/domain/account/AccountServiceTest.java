@@ -35,7 +35,7 @@ class AccountServiceTest {
 
     @Test
     void createAccount_success_returnsAccountWithZeroBalance() {
-        Member member = new Member("김유현", "yuhyun@example.com");
+        Member member = new Member("김유현", "yuhyun@example.com", "password123!");
         when(memberRepository.findById(1L)).thenReturn(Optional.of(member));
         when(accountRepository.existsByAccountNumber(any())).thenReturn(false);
         when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -58,7 +58,7 @@ class AccountServiceTest {
 
     @Test
     void getBalance_found_returnsBalance() {
-        Member member = new Member("김유현", "yuhyun@example.com");
+        Member member = new Member("김유현", "yuhyun@example.com", "password123!");
         Account account = new Account("123-456-7890", member);
         when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
 

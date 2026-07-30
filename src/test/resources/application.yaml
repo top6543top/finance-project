@@ -4,6 +4,10 @@ spring:
   jpa:
     hibernate:
       ddl-auto: create-drop
+
+jwt:
+  secret: test-only-jwt-secret-key-not-for-production-32bytes-min
+  expiration-ms: 3600000
 # datasource/dialect는 일부러 안 씀:
 # - Testcontainers 미사용 테스트 -> Spring Boot가 H2를 자동 감지해서 방언까지 맞춰줌
 # - @ServiceConnection 쓰는 테스트 -> 컨테이너의 실제 MySQL 연결정보/방언을 그대로 사용
