@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,8 +33,10 @@ public class AccountController {
 
     @GetMapping("/accounts/{accountNumber}")
     public ResponseEntity<ApiResponse<AccountBalanceResDto>> getBalance(
-            @PathVariable String accountNumber
+            @PathVariable String accountNumber,
+            Authentication authentication
     ) {
-        return ResponseEntity.ok(ApiResponse.success(accountService.getBalance(accountNumber)));
+        Long requesterId = (Long) authentication.getPrincipal();
+        return ResponseEntity.ok(ApiResponse.success(accountService.getBalance(accountNumber, requesterId)));
     }
 }
