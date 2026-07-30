@@ -12,6 +12,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -41,11 +42,19 @@ public class AccountService {
     }
 
     @Transactional(readOnly = true)
-    public AccountBalanceResDto getBalance(String accountNumber) {
+    public AccountBalanceResDto getBalance(String accountNumber, Long requesterId) {
         Account account = accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        validateOwner(account, requesterId);
 
         return new AccountBalanceResDto(account.getAccountNumber(), account.getBalance());
+    }
+
+    // 인증(로그인 여부)과 별개로, 로그인한 사용자가 "이 계좌"의 진짜 소유자인지 확인 (IS-17)
+    private void validateOwner(Account account, Long requesterId) {
+        if (!Objects.equals(account.getMember().getId(), requesterId)) {
+            throw new CustomException(ErrorCode.ACCESS_DENIED);
+        }
     }
 
     private String generateAccountNumber() {
