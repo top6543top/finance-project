@@ -25,9 +25,11 @@ public class AccountController {
 
     @PostMapping("/accounts")
     public ResponseEntity<ApiResponse<AccountCreateResDto>> createAccount(
-            @Valid @RequestBody AccountCreateReqDto request
+            @Valid @RequestBody AccountCreateReqDto request,
+            Authentication authentication
     ) {
-        AccountCreateResDto response = accountService.createAccount(request);
+        Long requesterId = (Long) authentication.getPrincipal();
+        AccountCreateResDto response = accountService.createAccount(request, requesterId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }
 

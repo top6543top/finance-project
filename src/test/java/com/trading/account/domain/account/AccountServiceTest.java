@@ -41,7 +41,7 @@ class AccountServiceTest {
         when(accountRepository.existsByAccountNumber(any())).thenReturn(false);
         when(accountRepository.save(any(Account.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        AccountCreateResDto response = accountService.createAccount(new AccountCreateReqDto(1L));
+        AccountCreateResDto response = accountService.createAccount(new AccountCreateReqDto(1L), 1L);
 
         assertThat(response.accountNumber()).isNotBlank();
         assertThat(response.balance()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -52,9 +52,17 @@ class AccountServiceTest {
         when(memberRepository.findById(1L)).thenReturn(Optional.empty());
 
         CustomException exception = catchThrowableOfType(
-                () -> accountService.createAccount(new AccountCreateReqDto(1L)), CustomException.class);
+                () -> accountService.createAccount(new AccountCreateReqDto(1L), 1L), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MEMBER_NOT_FOUND);
+    }
+
+    @Test
+    void createAccount_notSelf_throwsAccessDenied() {
+        CustomException exception = catchThrowableOfType(
+                () -> accountService.createAccount(new AccountCreateReqDto(1L), 2L), CustomException.class);
+
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCESS_DENIED);
     }
 
     @Test

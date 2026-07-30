@@ -46,12 +46,15 @@ class AccountControllerTest {
                 .build();
     }
 
+    private static final Authentication AUTH = new UsernamePasswordAuthenticationToken(1L, null);
+
     @Test
     void createAccount_valid_returns201() throws Exception {
-        when(accountService.createAccount(any()))
+        when(accountService.createAccount(any(), any()))
                 .thenReturn(new AccountCreateResDto(1L, "123-456-7890", BigDecimal.ZERO, 1L, LocalDateTime.now()));
 
         mockMvc.perform(post("/api/accounts")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"memberId\":1}"))
                 .andExpect(status().isCreated())
@@ -61,12 +64,11 @@ class AccountControllerTest {
     @Test
     void createAccount_missingMemberId_returns400() throws Exception {
         mockMvc.perform(post("/api/accounts")
+                        .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
     }
-
-    private static final Authentication AUTH = new UsernamePasswordAuthenticationToken(1L, null);
 
     @Test
     void getBalance_found_returns200() throws Exception {
