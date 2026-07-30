@@ -69,6 +69,15 @@ public class TransactionService {
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
     }
 
+    // Spring Retry는 retryFor에 해당 안 되는 예외라도 같은 메서드에 @Recover가 하나라도
+    // 있으면 recovery 매칭을 시도하고, 매칭되는 @Recover가 없으면 ExhaustedRetryException으로
+    // 감싸버린다. ACCOUNT_NOT_FOUND/INSUFFICIENT_BALANCE 같은 CustomException(비즈니스 예외,
+    // 재시도 대상 아님)이 그렇게 원래 에러코드를 잃고 500으로 새는 걸 막기 위해 그대로 다시 던진다.
+    @Recover
+    public TransactionResDto recoverBusinessException(CustomException e, String accountNumber, BigDecimal amount) {
+        throw e;
+    }
+
     // 이체는 두 계좌를 함께 다루는 원자적 작업이라 격리 수준을 REPEATABLE_READ로 명시:
     // 이체 도중 다른 트랜잭션이 두 계좌 중 하나를 갱신해도 이 트랜잭션 내에서는
     // 처음 조회한 잔고 값 기준으로 일관되게 차감/증액하도록 보장
@@ -106,6 +115,13 @@ public class TransactionService {
         log.warn("동시성 충돌로 {}회 재시도 후에도 이체 실패: from={}, to={}",
                 MAX_RETRY_ATTEMPTS, mask(request.fromAccountNumber()), mask(request.toAccountNumber()));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
+    }
+
+    // 위 recoverBusinessException()과 같은 이유: transfer()의 SELF_TRANSFER_NOT_ALLOWED/
+    // ACCOUNT_NOT_FOUND 같은 CustomException도 재시도 대상이 아니므로 그대로 다시 던진다.
+    @Recover
+    public TransferResDto recoverTransferBusinessException(CustomException e, TransferReqDto request) {
+        throw e;
     }
 
     @Transactional(readOnly = true)
