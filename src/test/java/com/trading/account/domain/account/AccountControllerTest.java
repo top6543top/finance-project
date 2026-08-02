@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
@@ -50,24 +49,12 @@ class AccountControllerTest {
 
     @Test
     void createAccount_valid_returns201() throws Exception {
-        when(accountService.createAccount(any(), any()))
+        when(accountService.createAccount(any()))
                 .thenReturn(new AccountCreateResDto(1L, "123-456-7890", BigDecimal.ZERO, 1L, LocalDateTime.now()));
 
-        mockMvc.perform(post("/api/accounts")
-                        .principal(AUTH)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"memberId\":1}"))
+        mockMvc.perform(post("/api/accounts").principal(AUTH))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.accountNumber").value("123-456-7890"));
-    }
-
-    @Test
-    void createAccount_missingMemberId_returns400() throws Exception {
-        mockMvc.perform(post("/api/accounts")
-                        .principal(AUTH)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest());
     }
 
     @Test

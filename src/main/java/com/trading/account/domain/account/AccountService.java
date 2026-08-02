@@ -3,7 +3,6 @@ package com.trading.account.domain.account;
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.domain.account.dto.AccountBalanceResDto;
-import com.trading.account.domain.account.dto.AccountCreateReqDto;
 import com.trading.account.domain.account.dto.AccountCreateResDto;
 import com.trading.account.domain.member.Member;
 import com.trading.account.domain.member.MemberRepository;
@@ -25,13 +24,10 @@ public class AccountService {
     private final AccountRepository accountRepository;
     private final MemberRepository memberRepository;
 
-    public AccountCreateResDto createAccount(AccountCreateReqDto request, Long requesterId) {
-        // 로그인한 사용자가 자기 자신의 memberId로만 계좌를 개설할 수 있도록 검증 (IS-17)
-        if (!Objects.equals(request.memberId(), requesterId)) {
-            throw new CustomException(ErrorCode.ACCESS_DENIED);
-        }
-
-        Member member = memberRepository.findById(request.memberId())
+    public AccountCreateResDto createAccount(Long requesterId) {
+        // 계좌는 항상 로그인한 본인 명의로만 개설 — 클라이언트가 memberId를 지정할 수 없도록
+        // 아예 요청 파라미터에서 없애고 인증된 requesterId만 사용한다 (IS-17)
+        Member member = memberRepository.findById(requesterId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 
         Account account;
