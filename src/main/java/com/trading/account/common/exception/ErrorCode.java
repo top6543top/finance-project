@@ -20,7 +20,8 @@ public enum ErrorCode {
     CONCURRENT_UPDATE_CONFLICT(HttpStatus.CONFLICT, "C010", "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요."),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "C011", "이메일 또는 비밀번호가 올바르지 않습니다."),
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "C012", "인증이 필요합니다."),
-    ACCESS_DENIED(HttpStatus.FORBIDDEN, "C013", "본인 소유의 계좌가 아닙니다.");
+    ACCESS_DENIED(HttpStatus.FORBIDDEN, "C013", "본인 소유의 계좌가 아닙니다."),
+    IDEMPOTENCY_REQUEST_IN_PROGRESS(HttpStatus.CONFLICT, "C014", "동일한 요청이 처리 중입니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String code;

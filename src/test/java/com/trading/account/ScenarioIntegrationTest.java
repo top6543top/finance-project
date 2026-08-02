@@ -129,6 +129,7 @@ class ScenarioIntegrationTest {
     private ResultActions deposit(Signup signup, String accountNumber, String amount) throws Exception {
         return mockMvc.perform(post("/api/accounts/{accountNumber}/deposit", accountNumber)
                         .header("Authorization", "Bearer " + signup.token())
+                        .header("Idempotency-Key", java.util.UUID.randomUUID().toString())
                         .contentType("application/json").content("{\"amount\":" + amount + "}"))
                 .andExpect(status().isOk());
     }
@@ -136,6 +137,7 @@ class ScenarioIntegrationTest {
     private ResultActions withdraw(Signup signup, String accountNumber, String amount) throws Exception {
         return mockMvc.perform(post("/api/accounts/{accountNumber}/withdraw", accountNumber)
                 .header("Authorization", "Bearer " + signup.token())
+                .header("Idempotency-Key", java.util.UUID.randomUUID().toString())
                 .contentType("application/json").content("{\"amount\":" + amount + "}"));
     }
 
@@ -143,6 +145,7 @@ class ScenarioIntegrationTest {
         String body = "{\"fromAccountNumber\":\"" + from + "\",\"toAccountNumber\":\"" + to + "\",\"amount\":" + amount + "}";
         return mockMvc.perform(post("/api/transfer")
                 .header("Authorization", "Bearer " + signup.token())
+                .header("Idempotency-Key", java.util.UUID.randomUUID().toString())
                 .contentType("application/json").content(body));
     }
 
