@@ -35,6 +35,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/members").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        // 헬스체크(LB/k8s probe)와 Prometheus 스크래핑은 JWT를 못 실어 보내므로 permitAll —
+                        // 실무에서는 이 경로를 인증이 아니라 네트워크(VPC/보안그룹)로 외부 접근을 차단해 보호함
+                        .requestMatchers("/actuator/health/**", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class);
         return http.build();
