@@ -2,9 +2,7 @@ package com.trading.account.domain.account;
 
 import com.trading.account.common.response.ApiResponse;
 import com.trading.account.domain.account.dto.AccountBalanceResDto;
-import com.trading.account.domain.account.dto.AccountCreateReqDto;
 import com.trading.account.domain.account.dto.AccountCreateResDto;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,12 +22,9 @@ public class AccountController {
     private final AccountService accountService;
 
     @PostMapping("/accounts")
-    public ResponseEntity<ApiResponse<AccountCreateResDto>> createAccount(
-            @Valid @RequestBody AccountCreateReqDto request,
-            Authentication authentication
-    ) {
+    public ResponseEntity<ApiResponse<AccountCreateResDto>> createAccount(Authentication authentication) {
         Long requesterId = (Long) authentication.getPrincipal();
-        AccountCreateResDto response = accountService.createAccount(request, requesterId);
+        AccountCreateResDto response = accountService.createAccount(requesterId);
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(response));
     }
 

@@ -108,8 +108,6 @@ class ScenarioIntegrationTest {
                         .contentType("application/json").content(signupBody))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
-        Long memberId = objectMapper.readTree(signupResponse).path("data").path("id").asLong();
-
         String loginBody = objectMapper.writeValueAsString(new LoginReq(email, PASSWORD));
         String loginResponse = mockMvc.perform(post("/api/auth/login")
                         .contentType("application/json").content(loginBody))
@@ -117,14 +115,12 @@ class ScenarioIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         String token = objectMapper.readTree(loginResponse).path("data").path("accessToken").asText();
 
-        return new Signup(memberId, token);
+        return new Signup(token);
     }
 
     private String createAccount(Signup signup) throws Exception {
-        String body = objectMapper.writeValueAsString(new AccountCreateReq(signup.memberId()));
         String response = mockMvc.perform(post("/api/accounts")
-                        .header("Authorization", "Bearer " + signup.token())
-                        .contentType("application/json").content(body))
+                        .header("Authorization", "Bearer " + signup.token()))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(response).path("data").path("accountNumber").asText();
@@ -162,15 +158,12 @@ class ScenarioIntegrationTest {
                 .andExpect(status().isOk());
     }
 
-    private record Signup(Long memberId, String token) {
+    private record Signup(String token) {
     }
 
     private record MemberCreateReq(String name, String email, String password) {
     }
 
     private record LoginReq(String email, String password) {
-    }
-
-    private record AccountCreateReq(Long memberId) {
     }
 }

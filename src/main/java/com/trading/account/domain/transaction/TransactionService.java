@@ -106,6 +106,7 @@ public class TransactionService {
         // 이체는 출금 계좌(from)만 요청자 소유인지 검증 — 입금 계좌(to)는 상대방 소유가 당연하므로 검증 대상 아님 (IS-17)
         validateOwner(from, requesterId);
 
+
         from.withdraw(request.amount());
         to.deposit(request.amount());
         flushBeforeHistoryInsert();
