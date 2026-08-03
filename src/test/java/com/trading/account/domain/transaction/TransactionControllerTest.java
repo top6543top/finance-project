@@ -61,10 +61,10 @@ class TransactionControllerTest {
     @Test
     void deposit_valid_returns200() throws Exception {
         when(transactionService.deposit(anyString(), any(), any()))
-                .thenReturn(new TransactionResDto("123-456-7890", BigDecimal.valueOf(1500), BigDecimal.valueOf(500),
+                .thenReturn(new TransactionResDto("123-456-78903", BigDecimal.valueOf(1500), BigDecimal.valueOf(500),
                         TransactionType.DEPOSIT, LocalDateTime.now()));
 
-        mockMvc.perform(post("/api/accounts/123-456-7890/deposit")
+        mockMvc.perform(post("/api/accounts/123-456-78903/deposit")
                         .principal(AUTH)
                         .header("Idempotency-Key", "test-key-1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -75,7 +75,7 @@ class TransactionControllerTest {
 
     @Test
     void deposit_negativeAmount_returns400() throws Exception {
-        mockMvc.perform(post("/api/accounts/123-456-7890/deposit")
+        mockMvc.perform(post("/api/accounts/123-456-78903/deposit")
                         .principal(AUTH)
                         .header("Idempotency-Key", "test-key-2")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -85,7 +85,7 @@ class TransactionControllerTest {
 
     @Test
     void deposit_missingIdempotencyKey_returns400() throws Exception {
-        mockMvc.perform(post("/api/accounts/123-456-7890/deposit")
+        mockMvc.perform(post("/api/accounts/123-456-78903/deposit")
                         .principal(AUTH)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amount\":500}"))
@@ -97,7 +97,7 @@ class TransactionControllerTest {
         when(transactionService.withdraw(anyString(), any(), any()))
                 .thenThrow(new CustomException(ErrorCode.INSUFFICIENT_BALANCE));
 
-        mockMvc.perform(post("/api/accounts/123-456-7890/withdraw")
+        mockMvc.perform(post("/api/accounts/123-456-78903/withdraw")
                         .principal(AUTH)
                         .header("Idempotency-Key", "test-key-3")
                         .contentType(MediaType.APPLICATION_JSON)

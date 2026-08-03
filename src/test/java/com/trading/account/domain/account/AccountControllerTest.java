@@ -50,19 +50,19 @@ class AccountControllerTest {
     @Test
     void createAccount_valid_returns201() throws Exception {
         when(accountService.createAccount(any()))
-                .thenReturn(new AccountCreateResDto(1L, "123-456-7890", BigDecimal.ZERO, 1L, LocalDateTime.now()));
+                .thenReturn(new AccountCreateResDto(1L, "123-456-78903", BigDecimal.ZERO, 1L, LocalDateTime.now()));
 
         mockMvc.perform(post("/api/accounts").principal(AUTH))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.accountNumber").value("123-456-7890"));
+                .andExpect(jsonPath("$.data.accountNumber").value("123-456-78903"));
     }
 
     @Test
     void getBalance_found_returns200() throws Exception {
-        when(accountService.getBalance("123-456-7890", 1L))
-                .thenReturn(new AccountBalanceResDto("123-456-7890", BigDecimal.TEN));
+        when(accountService.getBalance("123-456-78903", 1L))
+                .thenReturn(new AccountBalanceResDto("123-456-78903", BigDecimal.TEN));
 
-        mockMvc.perform(get("/api/accounts/123-456-7890").principal(AUTH))
+        mockMvc.perform(get("/api/accounts/123-456-78903").principal(AUTH))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.balance").value(10));
     }

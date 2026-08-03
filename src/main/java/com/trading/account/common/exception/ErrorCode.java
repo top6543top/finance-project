@@ -21,7 +21,8 @@ public enum ErrorCode {
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "C011", "이메일 또는 비밀번호가 올바르지 않습니다."),
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "C012", "인증이 필요합니다."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "C013", "본인 소유의 계좌가 아닙니다."),
-    IDEMPOTENCY_REQUEST_IN_PROGRESS(HttpStatus.CONFLICT, "C014", "동일한 요청이 처리 중입니다. 잠시 후 다시 시도해주세요.");
+    IDEMPOTENCY_REQUEST_IN_PROGRESS(HttpStatus.CONFLICT, "C014", "동일한 요청이 처리 중입니다. 잠시 후 다시 시도해주세요."),
+    INVALID_ACCOUNT_NUMBER(HttpStatus.BAD_REQUEST, "C015", "계좌번호 형식이 올바르지 않습니다.");
 
     private final HttpStatus status;
     private final String code;

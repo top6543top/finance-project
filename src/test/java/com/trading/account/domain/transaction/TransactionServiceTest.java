@@ -45,56 +45,64 @@ class TransactionServiceTest {
 
     @Test
     void deposit_success_increasesBalance() {
-        Account account = newAccount("123-456-7890");
-        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+        Account account = newAccount("123-456-78903");
+        when(accountRepository.findByAccountNumber("123-456-78903")).thenReturn(Optional.of(account));
         when(transactionHistoryRepository.save(any(TransactionHistory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        TransactionResDto response = transactionService.deposit("123-456-7890", OWNER_ID, BigDecimal.valueOf(500));
+        TransactionResDto response = transactionService.deposit("123-456-78903", OWNER_ID, BigDecimal.valueOf(500));
 
         assertThat(response.balance()).isEqualByComparingTo(BigDecimal.valueOf(1500));
     }
 
     @Test
     void withdraw_sufficientBalance_decreasesBalance() {
-        Account account = newAccount("123-456-7890");
-        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+        Account account = newAccount("123-456-78903");
+        when(accountRepository.findByAccountNumber("123-456-78903")).thenReturn(Optional.of(account));
         when(transactionHistoryRepository.save(any(TransactionHistory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        TransactionResDto response = transactionService.withdraw("123-456-7890", OWNER_ID, BigDecimal.valueOf(400));
+        TransactionResDto response = transactionService.withdraw("123-456-78903", OWNER_ID, BigDecimal.valueOf(400));
 
         assertThat(response.balance()).isEqualByComparingTo(BigDecimal.valueOf(600));
     }
 
     @Test
     void withdraw_insufficientBalance_throwsCustomException() {
-        Account account = newAccount("123-456-7890");
-        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+        Account account = newAccount("123-456-78903");
+        when(accountRepository.findByAccountNumber("123-456-78903")).thenReturn(Optional.of(account));
 
         CustomException exception = catchThrowableOfType(
-                () -> transactionService.withdraw("123-456-7890", OWNER_ID, BigDecimal.valueOf(9999)), CustomException.class);
+                () -> transactionService.withdraw("123-456-78903", OWNER_ID, BigDecimal.valueOf(9999)), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INSUFFICIENT_BALANCE);
     }
 
     @Test
     void deposit_accountNotFound_throwsCustomException() {
-        when(accountRepository.findByAccountNumber("000")).thenReturn(Optional.empty());
+        when(accountRepository.findByAccountNumber("000-000-00000")).thenReturn(Optional.empty());
 
         CustomException exception = catchThrowableOfType(
-                () -> transactionService.deposit("000", OWNER_ID, BigDecimal.valueOf(100)), CustomException.class);
+                () -> transactionService.deposit("000-000-00000", OWNER_ID, BigDecimal.valueOf(100)), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND);
     }
 
     @Test
+    void deposit_invalidAccountNumberFormat_throwsCustomException() {
+        CustomException exception = catchThrowableOfType(
+                () -> transactionService.deposit("not-a-number", OWNER_ID, BigDecimal.valueOf(100)), CustomException.class);
+
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ACCOUNT_NUMBER);
+    }
+
+    @Test
     void deposit_notOwner_throwsAccessDenied() {
-        Account account = newAccount("123-456-7890");
-        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+        Account account = newAccount("123-456-78903");
+        when(accountRepository.findByAccountNumber("123-456-78903")).thenReturn(Optional.of(account));
 
         CustomException exception = catchThrowableOfType(
-                () -> transactionService.deposit("123-456-7890", 2L, BigDecimal.valueOf(100)), CustomException.class);
+                () -> transactionService.deposit("123-456-78903", 2L, BigDecimal.valueOf(100)), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCESS_DENIED);
     }

@@ -3,6 +3,7 @@ package com.trading.account.domain.transaction;
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.domain.account.Account;
+import com.trading.account.domain.account.AccountNumberValidator;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
@@ -140,6 +141,9 @@ public class TransactionService {
     }
 
     private Account getAccount(String accountNumber) {
+        if (!AccountNumberValidator.isValid(accountNumber)) {
+            throw new CustomException(ErrorCode.INVALID_ACCOUNT_NUMBER);
+        }
         return accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
     }

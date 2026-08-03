@@ -44,6 +44,9 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public AccountBalanceResDto getBalance(String accountNumber, Long requesterId) {
+        if (!AccountNumberValidator.isValid(accountNumber)) {
+            throw new CustomException(ErrorCode.INVALID_ACCOUNT_NUMBER);
+        }
         Account account = accountRepository.findByAccountNumber(accountNumber)
                 .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
         validateOwner(account, requesterId);
@@ -60,10 +63,12 @@ public class AccountService {
 
     private String generateAccountNumber() {
         for (int i = 0; i < ACCOUNT_NUMBER_GENERATION_RETRY; i++) {
-            String candidate = String.format("%03d-%03d-%04d",
+            String digitsOnly = String.format("%03d%03d%04d",
                     ThreadLocalRandom.current().nextInt(1000),
                     ThreadLocalRandom.current().nextInt(1000),
                     ThreadLocalRandom.current().nextInt(10000));
+            String withCheckDigit = AccountNumberValidator.appendCheckDigit(digitsOnly);
+            String candidate = withCheckDigit.substring(0, 3) + "-" + withCheckDigit.substring(3, 6) + "-" + withCheckDigit.substring(6);
             if (!accountRepository.existsByAccountNumber(candidate)) {
                 return candidate;
             }
