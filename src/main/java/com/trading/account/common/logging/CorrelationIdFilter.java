@@ -21,12 +21,14 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
     public static final String HEADER = "X-Request-Id";
     private static final String MDC_KEY = "requestId";
+    private static final int MAX_LENGTH = 64;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String requestId = request.getHeader(HEADER);
-        if (requestId == null || requestId.isBlank()) {
+        // 클라이언트가 준 값을 그대로 신뢰하지 않음 — 과도하게 길면 응답 헤더 크기 초과(500) 및 로그 볼륨 증폭으로 이어짐
+        if (requestId == null || requestId.isBlank() || requestId.length() > MAX_LENGTH) {
             requestId = UUID.randomUUID().toString();
         }
 
