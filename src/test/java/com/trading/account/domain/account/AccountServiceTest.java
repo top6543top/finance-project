@@ -60,34 +60,42 @@ class AccountServiceTest {
     void getBalance_found_returnsBalance() {
         Member owner = mock(Member.class);
         when(owner.getId()).thenReturn(1L);
-        Account account = new Account("123-456-7890", owner);
-        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+        Account account = new Account("123-456-78903", owner);
+        when(accountRepository.findByAccountNumber("123-456-78903")).thenReturn(Optional.of(account));
 
-        AccountBalanceResDto response = accountService.getBalance("123-456-7890", 1L);
+        AccountBalanceResDto response = accountService.getBalance("123-456-78903", 1L);
 
-        assertThat(response.accountNumber()).isEqualTo("123-456-7890");
+        assertThat(response.accountNumber()).isEqualTo("123-456-78903");
         assertThat(response.balance()).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
     @Test
     void getBalance_notFound_throwsCustomException() {
-        when(accountRepository.findByAccountNumber("000")).thenReturn(Optional.empty());
+        when(accountRepository.findByAccountNumber("000-000-00000")).thenReturn(Optional.empty());
 
         CustomException exception = catchThrowableOfType(
-                () -> accountService.getBalance("000", 1L), CustomException.class);
+                () -> accountService.getBalance("000-000-00000", 1L), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_NOT_FOUND);
+    }
+
+    @Test
+    void getBalance_invalidFormat_throwsCustomException() {
+        CustomException exception = catchThrowableOfType(
+                () -> accountService.getBalance("not-a-number", 1L), CustomException.class);
+
+        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ACCOUNT_NUMBER);
     }
 
     @Test
     void getBalance_notOwner_throwsAccessDenied() {
         Member owner = mock(Member.class);
         when(owner.getId()).thenReturn(1L);
-        Account account = new Account("123-456-7890", owner);
-        when(accountRepository.findByAccountNumber("123-456-7890")).thenReturn(Optional.of(account));
+        Account account = new Account("123-456-78903", owner);
+        when(accountRepository.findByAccountNumber("123-456-78903")).thenReturn(Optional.of(account));
 
         CustomException exception = catchThrowableOfType(
-                () -> accountService.getBalance("123-456-7890", 2L), CustomException.class);
+                () -> accountService.getBalance("123-456-78903", 2L), CustomException.class);
 
         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCESS_DENIED);
     }

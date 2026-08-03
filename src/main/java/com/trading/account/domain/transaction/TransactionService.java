@@ -4,6 +4,7 @@ import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
+import com.trading.account.domain.account.AccountService;
 import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
 import com.trading.account.domain.transaction.dto.TransactionResDto;
 import com.trading.account.domain.transaction.dto.TransferReqDto;
@@ -22,7 +23,6 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.Objects;
 
 @Slf4j
 @Service
@@ -39,12 +39,13 @@ public class TransactionService {
 
     private final AccountRepository accountRepository;
     private final TransactionHistoryRepository transactionHistoryRepository;
+    private final AccountService accountService;
 
     @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
             backoff = @Backoff(delay = 50, multiplier = 2, random = true))
     public TransactionResDto deposit(String accountNumber, Long requesterId, BigDecimal amount) {
-        Account account = getAccount(accountNumber);
-        validateOwner(account, requesterId);
+        Account account = accountService.getAccount(accountNumber);
+        accountService.validateOwner(account, requesterId);
         account.deposit(amount);
         flushBeforeHistoryInsert();
         TransactionHistory history = transactionHistoryRepository.save(
@@ -56,8 +57,8 @@ public class TransactionService {
     @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
             backoff = @Backoff(delay = 50, multiplier = 2, random = true))
     public TransactionResDto withdraw(String accountNumber, Long requesterId, BigDecimal amount) {
-        Account account = getAccount(accountNumber);
-        validateOwner(account, requesterId);
+        Account account = accountService.getAccount(accountNumber);
+        accountService.validateOwner(account, requesterId);
         account.withdraw(amount);
         flushBeforeHistoryInsert();
         TransactionHistory history = transactionHistoryRepository.save(
@@ -98,13 +99,13 @@ public class TransactionService {
         // 계좌번호 문자열 비교로 항상 같은 전역 순서로 조회해서 flush 순서를 고정하면,
         // 이체 방향과 무관하게 모든 트랜잭션이 같은 순서로만 잠그게 되어 순환 대기 자체가 사라진다.
         boolean fromFirst = request.fromAccountNumber().compareTo(request.toAccountNumber()) < 0;
-        Account first = getAccount(fromFirst ? request.fromAccountNumber() : request.toAccountNumber());
-        Account second = getAccount(fromFirst ? request.toAccountNumber() : request.fromAccountNumber());
+        Account first = accountService.getAccount(fromFirst ? request.fromAccountNumber() : request.toAccountNumber());
+        Account second = accountService.getAccount(fromFirst ? request.toAccountNumber() : request.fromAccountNumber());
         Account from = fromFirst ? first : second;
         Account to = fromFirst ? second : first;
 
         // 이체는 출금 계좌(from)만 요청자 소유인지 검증 — 입금 계좌(to)는 상대방 소유가 당연하므로 검증 대상 아님 (IS-17)
-        validateOwner(from, requesterId);
+        accountService.validateOwner(from, requesterId);
 
 
         from.withdraw(request.amount());
@@ -133,22 +134,10 @@ public class TransactionService {
 
     @Transactional(readOnly = true)
     public Page<TransactionHistoryResDto> getHistory(String accountNumber, Long requesterId, Pageable pageable) {
-        Account account = getAccount(accountNumber);
-        validateOwner(account, requesterId);
+        Account account = accountService.getAccount(accountNumber);
+        accountService.validateOwner(account, requesterId);
         return transactionHistoryRepository.findByAccount(account, pageable)
                 .map(TransactionHistoryResDto::from);
-    }
-
-    private Account getAccount(String accountNumber) {
-        return accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
-    }
-
-    // 인증(로그인 여부)과 별개로, 로그인한 사용자가 "이 계좌"의 진짜 소유자인지 확인 (IS-17)
-    private void validateOwner(Account account, Long requesterId) {
-        if (!Objects.equals(account.getMember().getId(), requesterId)) {
-            throw new CustomException(ErrorCode.ACCESS_DENIED);
-        }
     }
 
     // TransactionHistory는 IDENTITY 채번이라 save() 시점에 즉시 INSERT가 나가고, FK 제약 검사 때문에

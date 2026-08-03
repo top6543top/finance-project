@@ -56,8 +56,8 @@ class TransactionConcurrencyTest {
     @Test
     void concurrentWithdraw_100Threads_balanceStaysConsistentAndFailuresAreStructured() throws InterruptedException {
         Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
-        accountRepository.save(new Account("999-999-9999", member));
-        transactionService.deposit("999-999-9999", member.getId(), BigDecimal.valueOf(10_000));
+        accountRepository.save(new Account("999-999-99990", member));
+        transactionService.deposit("999-999-99990", member.getId(), BigDecimal.valueOf(10_000));
 
         int threadCount = 100;
         BigDecimal withdrawAmount = BigDecimal.valueOf(100);
@@ -72,7 +72,7 @@ class TransactionConcurrencyTest {
             executor.submit(() -> {
                 try {
                     start.await();
-                    transactionService.withdraw("999-999-9999", member.getId(), withdrawAmount);
+                    transactionService.withdraw("999-999-99990", member.getId(), withdrawAmount);
                     successCount.incrementAndGet();
                 } catch (CustomException e) {
                     if (e.getErrorCode() == ErrorCode.CONCURRENT_UPDATE_CONFLICT) {
@@ -92,7 +92,7 @@ class TransactionConcurrencyTest {
         done.await(30, TimeUnit.SECONDS);
         executor.shutdown();
 
-        BigDecimal finalBalance = accountRepository.findByAccountNumber("999-999-9999")
+        BigDecimal finalBalance = accountRepository.findByAccountNumber("999-999-99990")
                 .orElseThrow()
                 .getBalance();
 
@@ -118,8 +118,8 @@ class TransactionConcurrencyTest {
     void concurrentBidirectionalTransfer_noDeadlock_balanceSumStaysConsistent() throws InterruptedException {
         Member memberA = memberRepository.save(new Member("김에이", "a@example.com", "password123!"));
         Member memberB = memberRepository.save(new Member("김비", "b@example.com", "password123!"));
-        String accountA = "111-111-1111";
-        String accountB = "222-222-2222";
+        String accountA = "111-111-11115";
+        String accountB = "222-222-22220";
         accountRepository.save(new Account(accountA, memberA));
         accountRepository.save(new Account(accountB, memberB));
         transactionService.deposit(accountA, memberA.getId(), BigDecimal.valueOf(100_000));

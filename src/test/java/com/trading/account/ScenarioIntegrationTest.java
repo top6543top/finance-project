@@ -77,7 +77,7 @@ class ScenarioIntegrationTest {
         String account = createAccount(signup);
         deposit(signup, account, "1000");
 
-        transfer(signup, account, "000-000-0000", "500")
+        transfer(signup, account, "000-000-00000", "500")
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(ErrorCode.ACCOUNT_NOT_FOUND.getCode()));
     }
@@ -95,7 +95,7 @@ class ScenarioIntegrationTest {
 
     @Test
     void accountApi_withoutToken_returnsUnauthenticated() throws Exception {
-        mockMvc.perform(get("/api/accounts/000-000-0000"))
+        mockMvc.perform(get("/api/accounts/000-000-00000"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(ErrorCode.UNAUTHENTICATED.getCode()));
     }
