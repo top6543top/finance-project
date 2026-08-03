@@ -44,18 +44,23 @@ public class AccountService {
 
     @Transactional(readOnly = true)
     public AccountBalanceResDto getBalance(String accountNumber, Long requesterId) {
-        if (!AccountNumberValidator.isValid(accountNumber)) {
-            throw new CustomException(ErrorCode.INVALID_ACCOUNT_NUMBER);
-        }
-        Account account = accountRepository.findByAccountNumber(accountNumber)
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        Account account = getAccount(accountNumber);
         validateOwner(account, requesterId);
 
         return new AccountBalanceResDto(account.getAccountNumber(), account.getBalance());
     }
 
+    // 계좌 조회+존재검증은 Account 도메인 책임 — TransactionService 등 다른 서비스에서도 사용 (public)
+    public Account getAccount(String accountNumber) {
+        if (!AccountNumberValidator.isValid(accountNumber)) {
+            throw new CustomException(ErrorCode.INVALID_ACCOUNT_NUMBER);
+        }
+        return accountRepository.findByAccountNumber(accountNumber)
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+    }
+
     // 인증(로그인 여부)과 별개로, 로그인한 사용자가 "이 계좌"의 진짜 소유자인지 확인 (IS-17)
-    private void validateOwner(Account account, Long requesterId) {
+    public void validateOwner(Account account, Long requesterId) {
         if (!Objects.equals(account.getMember().getId(), requesterId)) {
             throw new CustomException(ErrorCode.ACCESS_DENIED);
         }
