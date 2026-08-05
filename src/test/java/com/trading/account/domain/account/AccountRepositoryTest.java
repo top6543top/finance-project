@@ -49,4 +49,19 @@ class AccountRepositoryTest {
         assertThat(accountRepository.findByAccountNumber("111-222-3333")).isPresent();
         assertThat(accountRepository.findByAccountNumber("nope")).isEmpty();
     }
+
+    @Test
+    void decreaseBalanceIfEnough_updatesOnlyWhenBalanceIsEnough() {
+        Member member = memberRepository.save(new Member("김유현", "atomic@example.com", "password123!"));
+        Account account = accountRepository.save(new Account("333-333-33335", member));
+        accountRepository.increaseBalance(account.getId(), BigDecimal.valueOf(1000));
+
+        int updated = accountRepository.decreaseBalanceIfEnough(account.getId(), BigDecimal.valueOf(400));
+        int rejected = accountRepository.decreaseBalanceIfEnough(account.getId(), BigDecimal.valueOf(9999));
+
+        assertThat(updated).isEqualTo(1);
+        assertThat(rejected).isZero();
+        assertThat(accountRepository.findBalanceById(account.getId()))
+                .hasValueSatisfying(balance -> assertThat(balance).isEqualByComparingTo(BigDecimal.valueOf(600)));
+    }
 }

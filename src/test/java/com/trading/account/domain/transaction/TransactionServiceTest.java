@@ -12,8 +12,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
@@ -42,6 +44,7 @@ class TransactionServiceTest {
 
     private Account newAccount(String accountNumber) {
         Account account = new Account(accountNumber, mock(Member.class));
+        ReflectionTestUtils.setField(account, "id", 1L);
         account.deposit(BigDecimal.valueOf(1000));
         return account;
     }
@@ -50,6 +53,8 @@ class TransactionServiceTest {
     void deposit_success_increasesBalance() {
         Account account = newAccount("123-456-78903");
         when(accountService.getAccount("123-456-78903")).thenReturn(account);
+        when(accountRepository.increaseBalance(1L, BigDecimal.valueOf(500))).thenReturn(1);
+        when(accountRepository.findBalanceById(1L)).thenReturn(Optional.of(BigDecimal.valueOf(1500)));
         when(transactionHistoryRepository.save(any(TransactionHistory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -62,6 +67,8 @@ class TransactionServiceTest {
     void withdraw_sufficientBalance_decreasesBalance() {
         Account account = newAccount("123-456-78903");
         when(accountService.getAccount("123-456-78903")).thenReturn(account);
+        when(accountRepository.decreaseBalanceIfEnough(1L, BigDecimal.valueOf(400))).thenReturn(1);
+        when(accountRepository.findBalanceById(1L)).thenReturn(Optional.of(BigDecimal.valueOf(600)));
         when(transactionHistoryRepository.save(any(TransactionHistory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -74,6 +81,7 @@ class TransactionServiceTest {
     void withdraw_insufficientBalance_throwsCustomException() {
         Account account = newAccount("123-456-78903");
         when(accountService.getAccount("123-456-78903")).thenReturn(account);
+        when(accountRepository.decreaseBalanceIfEnough(1L, BigDecimal.valueOf(9999))).thenReturn(0);
 
         CustomException exception = catchThrowableOfType(
                 () -> transactionService.withdraw("123-456-78903", OWNER_ID, BigDecimal.valueOf(9999)), CustomException.class);

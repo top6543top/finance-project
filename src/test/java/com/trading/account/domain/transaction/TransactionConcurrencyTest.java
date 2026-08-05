@@ -43,16 +43,10 @@ class TransactionConcurrencyTest {
     @Autowired
     private MemberRepository memberRepository;
 
-    // IS-12/13: 100 스레드가 계좌 1개에 동시 출금. Account.version(@Version) 덕분에
-    // 서로 덮어쓰는 lost update(잔고 마이너스)는 애초에 안 나고, TransactionService의
-    // @Retryable(최대 5회)이 버전 충돌/데드락을 재시도로 흡수한다.
-    // 다만 100 스레드가 "같은 행 1개"를 동시에 잡는 건 낙관적 락이 애초에 가정한
-    // "충돌 낮은 빈도"를 크게 벗어난 최악의 시나리오라, 5회 재시도로도 일부는 끝까지
-    // 충돌해 실패할 수 있음 — 그건 버그가 아니라 낙관적 락의 설계상 트레이드오프.
-    // 그래서 이 테스트가 지키는 건 "100건 전부 성공"이 아니라:
-    //   1) 잔고 정합성 (성공한 만큼만 정확히 차감, 유실/중복 없음)
-    //   2) 실패는 반드시 구조화된 CustomException(409) — 원본 DB 예외가 새어나가면 안 됨
-    //   3) 재시도 덕분에 성공률이 재현 테스트(재시도 없음, 12/100) 대비 크게 개선
+    // IS-31: 잔액 확인과 차감을 조건부 원자적 UPDATE 한 번으로 처리한다.
+    // 같은 계좌에 100개 출금 요청이 몰려도 DB가 row update를 직렬화하고, 각 UPDATE는
+    // 최신 잔액 기준으로 balance >= amount 조건을 다시 판단한다. 초기 잔액이 정확히
+    // 100건을 감당할 수 있으므로, 원본 DB 예외 누출 없이 100건 모두 성공해야 한다.
     @Test
     void concurrentWithdraw_100Threads_balanceStaysConsistentAndFailuresAreStructured() throws InterruptedException {
         Member member = memberRepository.save(new Member("김유현", "yuhyun@example.com", "password123!"));
@@ -89,22 +83,18 @@ class TransactionConcurrencyTest {
         }
 
         start.countDown();
-        done.await(30, TimeUnit.SECONDS);
+        boolean finishedInTime = done.await(30, TimeUnit.SECONDS);
         executor.shutdown();
 
         BigDecimal finalBalance = accountRepository.findByAccountNumber("999-999-99990")
                 .orElseThrow()
                 .getBalance();
 
-        // 원본 DB 예외(deadlock, optimistic lock 등)가 그대로 새어나온 요청은 하나도 없어야 함
+        assertThat(finishedInTime).isTrue();
         assertThat(unexpectedFailures).isEmpty();
-        // 성공/충돌로 분류된 개수 합이 총 요청 수와 일치 (요청이 조용히 사라지지 않음)
-        assertThat(successCount.get() + conflictCount.get()).isEqualTo(threadCount);
-        // 성공한 만큼만 정확히 차감됨 (lost update, 중복 차감 없음)
-        assertThat(finalBalance).isEqualByComparingTo(
-                BigDecimal.valueOf(10_000).subtract(withdrawAmount.multiply(BigDecimal.valueOf(successCount.get()))));
-        // 재시도 덕분에 재현 테스트(재시도 없이 12/100 성공) 대비 성공률이 크게 개선됨
-        assertThat(successCount.get()).isGreaterThanOrEqualTo(70);
+        assertThat(conflictCount.get()).isZero();
+        assertThat(successCount.get()).isEqualTo(threadCount);
+        assertThat(finalBalance).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
     // transfer()는 두 계좌(from, to)를 함께 잠그는데, A→B와 B→A가 동시에 일어나면 각자
