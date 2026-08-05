@@ -46,12 +46,11 @@ public class TransactionService {
     public TransactionResDto deposit(String accountNumber, Long requesterId, BigDecimal amount) {
         Account account = accountService.getAccount(accountNumber);
         accountService.validateOwner(account, requesterId);
-        account.deposit(amount);
-        flushBeforeHistoryInsert();
+        increaseBalance(account, amount);
         TransactionHistory history = transactionHistoryRepository.save(
                 new TransactionHistory(null, account, amount, TransactionType.DEPOSIT));
         log.info("입금 완료: account={}, amount={}", mask(accountNumber), amount);
-        return toTransactionResDto(account, amount, TransactionType.DEPOSIT, history.getCreatedAt());
+        return toTransactionResDto(account, currentBalance(account), amount, TransactionType.DEPOSIT, history.getCreatedAt());
     }
 
     @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
@@ -59,12 +58,11 @@ public class TransactionService {
     public TransactionResDto withdraw(String accountNumber, Long requesterId, BigDecimal amount) {
         Account account = accountService.getAccount(accountNumber);
         accountService.validateOwner(account, requesterId);
-        account.withdraw(amount);
-        flushBeforeHistoryInsert();
+        decreaseBalanceIfEnough(account, amount);
         TransactionHistory history = transactionHistoryRepository.save(
                 new TransactionHistory(account, null, amount, TransactionType.WITHDRAW));
         log.info("출금 완료: account={}, amount={}", mask(accountNumber), amount);
-        return toTransactionResDto(account, amount, TransactionType.WITHDRAW, history.getCreatedAt());
+        return toTransactionResDto(account, currentBalance(account), amount, TransactionType.WITHDRAW, history.getCreatedAt());
     }
 
     @Recover
@@ -108,9 +106,14 @@ public class TransactionService {
         accountService.validateOwner(from, requesterId);
 
 
-        from.withdraw(request.amount());
-        to.deposit(request.amount());
-        flushBeforeHistoryInsert();
+        if (fromFirst) {
+            decreaseBalanceIfEnough(from, request.amount());
+            increaseBalance(to, request.amount());
+        } else {
+            increaseBalance(to, request.amount());
+            decreaseBalanceIfEnough(from, request.amount());
+        }
+
         TransactionHistory history = transactionHistoryRepository.save(
                 new TransactionHistory(from, to, request.amount(), TransactionType.TRANSFER));
 
@@ -140,18 +143,27 @@ public class TransactionService {
                 .map(TransactionHistoryResDto::from);
     }
 
-    // TransactionHistory는 IDENTITY 채번이라 save() 시점에 즉시 INSERT가 나가고, FK 제약 검사 때문에
-    // 참조되는 account 행에 공유 락(S-lock)을 먼저 잡는다. 반면 account.balance 변경은 더티체킹이라
-    // 커밋 시점에야 UPDATE(배타 락, X-lock)가 나간다. 이 순서(S-lock 먼저, X-lock 나중)로 두면 두
-    // 트랜잭션이 서로 상대의 S-lock 해제를 기다리며 X-lock으로 승격하려다 데드락이 난다(IS-12에서
-    // 실제 관측). account UPDATE를 여기서 미리 flush해서 X-lock을 먼저 잡아버리면 이 승격 경쟁 자체가
-    // 사라진다.
-    private void flushBeforeHistoryInsert() {
-        accountRepository.flush();
+    private void increaseBalance(Account account, BigDecimal amount) {
+        int updated = accountRepository.increaseBalance(account.getId(), amount);
+        if (updated != 1) {
+            throw new CustomException(ErrorCode.ACCOUNT_NOT_FOUND);
+        }
     }
 
-    private TransactionResDto toTransactionResDto(Account account, BigDecimal amount, TransactionType type, LocalDateTime createdAt) {
-        return new TransactionResDto(account.getAccountNumber(), account.getBalance(), amount, type, createdAt);
+    private void decreaseBalanceIfEnough(Account account, BigDecimal amount) {
+        int updated = accountRepository.decreaseBalanceIfEnough(account.getId(), amount);
+        if (updated != 1) {
+            throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
+        }
+    }
+
+    private BigDecimal currentBalance(Account account) {
+        return accountRepository.findBalanceById(account.getId())
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+    }
+
+    private TransactionResDto toTransactionResDto(Account account, BigDecimal balance, BigDecimal amount, TransactionType type, LocalDateTime createdAt) {
+        return new TransactionResDto(account.getAccountNumber(), balance, amount, type, createdAt);
     }
 
     // 계좌번호 뒷자리만 남기고 마스킹 (금융 도메인 로그에 전체 계좌번호 노출 금지)
