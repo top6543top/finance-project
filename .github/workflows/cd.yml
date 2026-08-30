@@ -9,7 +9,7 @@ env:
   AWS_REGION: ap-northeast-2
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,12 +30,14 @@ jobs:
           docker push $ECR_REPOSITORY:${{ github.sha }}
           docker push $ECR_REPOSITORY:latest
 
+  deploy:
+    needs: build
+    runs-on: self-hosted
+    env:
+      KUBECONFIG: /home/ubuntu/.kube/config
+    steps:
       - name: Deploy to k3s
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_KEY }}
-          script: |
-            kubectl set image deployment/account-service account-service=${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-            kubectl rollout status deployment/account-service --timeout=120s
+        run: |
+          kubectl set image deployment/account-service \
+            account-service=${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          kubectl rollout status deployment/account-service --timeout=120s
