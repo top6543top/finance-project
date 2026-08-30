@@ -2,7 +2,7 @@ name: CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 env:
   ECR_REPOSITORY: 982248023836.dkr.ecr.ap-northeast-2.amazonaws.com/account-service
