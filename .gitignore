@@ -1,6 +1,7 @@
 application-local.yaml
 application-local.yml
 .omc/
+k8s/secret.yaml
 
 HELP.md
 .gradle
