@@ -20,6 +20,13 @@ spring:
         show_sql: false
     database-platform: org.hibernate.dialect.MySQLDialect
 
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  # SIGTERM 받아도 즉시 종료하지 않고, 처리 중인 요청을 끝낼 때까지 최대 20초 대기 (IS-34 무중단 배포)
+  shutdown: graceful
+
 jwt:
   secret: ${JWT_SECRET}
   expiration-ms: ${JWT_EXPIRATION_MS:3600000}
