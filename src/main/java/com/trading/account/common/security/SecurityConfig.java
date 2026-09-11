@@ -35,12 +35,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/members").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                        // 헬스체크(LB/k8s probe)는 JWT를 못 실어 보내므로 permitAll.
-                        // Prometheus는 여기서 뺌 — 로그인 성공/실패 카운터 등 민감 지표가 있어 인증 필요.
-                        // 지금(EC2) 배포엔 이걸 긁는 Prometheus가 없어 인증으로 막고,
-                        // 나중에 k8s로 옮겨 management.server.port를 분리하면 이 규칙 자체를 안 거치게 되고
-                        // NetworkPolicy 같은 네트워크 경계가 실제 보호를 담당하게 됨.
-                        .requestMatchers("/actuator/health/**").permitAll()
+                        // management.server.port(9090)로 분리해도 이 필터체인이 그대로 적용됨
+                        // (경로 매칭이라 포트 무관 — 실측으로 확인, 주석으로만 추정하지 말 것).
+                        // 실제 보호막은 Service/Ingress가 9090을 외부에 안 여는 것(IS-33)이라 permitAll로 둬도 됨.
+                        .requestMatchers("/actuator/health/**", "/actuator/prometheus").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtTokenProvider), UsernamePasswordAuthenticationFilter.class);
         return http.build();
