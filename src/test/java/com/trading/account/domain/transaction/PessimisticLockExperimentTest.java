@@ -1,5 +1,6 @@
 package com.trading.account.domain.transaction;
 
+import com.trading.account.AbstractIntegrationTest;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.member.Member;
@@ -7,10 +8,6 @@ import com.trading.account.domain.member.MemberRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -28,12 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 // 실측 비교한다. 재시도가 없으므로 여기서 실패가 나오면 락 대기 자체가 문제라는 뜻 — 정상적으로는
 // 100건 전부 "성공 또는 대기 후 성공"이어야 하고, 원본 DB 예외 누출도 없어야 한다.
 @SpringBootTest
-@Testcontainers
-class PessimisticLockExperimentTest {
-
-    @Container
-    @ServiceConnection
-    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
+class PessimisticLockExperimentTest extends AbstractIntegrationTest {
 
     @Autowired
     private PessimisticLockWithdrawService pessimisticLockWithdrawService;

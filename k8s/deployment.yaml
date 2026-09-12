@@ -24,6 +24,8 @@ spec:
           image: 982248023836.dkr.ecr.ap-northeast-2.amazonaws.com/account-service:latest
           ports:
             - containerPort: 8080
+            - containerPort: 9090
+              name: management
           env:
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=60 -Xss512k"
@@ -40,13 +42,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: 8080
+              port: 9090
             initialDelaySeconds: 20
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: 8080
+              port: 9090
             initialDelaySeconds: 60
             periodSeconds: 10
           envFrom:

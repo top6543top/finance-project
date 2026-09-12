@@ -1,5 +1,6 @@
 package com.trading.account.domain.transaction;
 
+import com.trading.account.AbstractIntegrationTest;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.member.Member;
@@ -8,11 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.data.domain.PageRequest;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 
@@ -20,12 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Testcontainers
-class TransactionHistoryRepositoryTest {
-
-    @Container
-    @ServiceConnection
-    static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0");
+class TransactionHistoryRepositoryTest extends AbstractIntegrationTest {
 
     @Autowired
     private TransactionHistoryRepository transactionHistoryRepository;

@@ -33,7 +33,11 @@ jwt:
 
 # health/prometheus만 노출 (env, beans 등은 계좌/잔고 설정값까지 흘릴 수 있어 기본 비공개)
 # show-details: never — 미인증 헬스체크 응답에 DB 연결 정보 등 내부 구조가 드러나지 않도록
+# server.port(8080)와 분리 — SecurityConfig의 인증 필터체인이 이 포트엔 안 걸림.
+# 대신 Service/Ingress로 9090을 외부에 안 열어서(클러스터 내부에서만 접근) 보호함 (IS-33)
 management:
+  server:
+    port: 9090
   endpoints:
     web:
       exposure:
