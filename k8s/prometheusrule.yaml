@@ -1,0 +1,44 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: account-service-alerts
+  namespace: monitoring
+  labels:
+    # ServiceMonitor와 동일한 release 라벨 — Prometheus Operator의 ruleSelector가 이걸로 이 룰을 인식함
+    release: monitoring
+spec:
+  groups:
+    - name: account-service.rules
+      rules:
+        - alert: AccountServiceHighErrorRate
+          expr: >
+            100 * sum(rate(http_server_requests_seconds_count{job="account-service",status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_server_requests_seconds_count{job="account-service"}[5m])), 1e-9)
+            > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "account-service 5xx 에러율 5% 초과"
+            description: "최근 5분간 5xx 응답 비율이 {{ $value | printf \"%.1f\" }}% 입니다."
+
+        - alert: AccountServiceHighP99Latency
+          expr: >
+            histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job="account-service"}[5m])) by (le))
+            > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "account-service p99 지연시간 1초 초과"
+            description: "최근 5분간 p99 지연시간이 {{ $value | printf \"%.2f\" }}s 입니다."
+
+        - alert: AccountServicePodRestarting
+          expr: >
+            increase(kube_pod_container_status_restarts_total{namespace="default", pod=~"account-service-.*"}[15m])
+            > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: "account-service 파드가 재시작됨"
+            description: "{{ $labels.pod }} 파드가 최근 15분 내 {{ $value }}회 재시작했습니다. (정상 롤링 배포는 재시작 카운트를 올리지 않음 — crash/OOMKill 의심)"

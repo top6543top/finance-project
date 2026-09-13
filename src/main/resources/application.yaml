@@ -47,6 +47,11 @@ management:
       probes:
         enabled: true
       show-details: never
+  metrics:
+    distribution:
+      # histogram_quantile로 p99 계산하려면 _bucket 시계열이 있어야 함 (IS-33 Grafana p99 패널/알람 전제조건)
+      percentiles-histogram:
+        http.server.requests: true
 
 logging:
   level:
