@@ -36,6 +36,27 @@ jobs:
     env:
       KUBECONFIG: /home/ubuntu/.kube/config
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply DB secret
+        # 값은 git에 올리지 않고 GitHub Actions Secrets에서 주입 — kubectl create --dry-run=client | apply는 있으면 갱신, 없으면 생성
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        run: |
+          kubectl create secret generic account-db-secret \
+            --from-literal=SPRING_DATASOURCE_URL="jdbc:mysql://account-db.cdy2e0qkmw4t.ap-northeast-2.rds.amazonaws.com:3306/account?serverTimezone=Asia/Seoul&characterEncoding=UTF-8" \
+            --from-literal=SPRING_DATASOURCE_USERNAME=admin \
+            --from-literal=SPRING_DATASOURCE_PASSWORD="$DB_PASSWORD" \
+            --from-literal=SPRING_PROFILES_ACTIVE=prod \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply k8s manifests
+        run: |
+          kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/ingress.yaml \
+            -f k8s/servicemonitor.yaml -f k8s/grafana-dashboard.yaml -f k8s/prometheusrule.yaml
+
       - name: Deploy to k3s
         run: |
           kubectl set image deployment/account-service \
