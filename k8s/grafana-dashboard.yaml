@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: account-service-golden-signals
+  namespace: monitoring
+  labels:
+    # kube-prometheus-stack Grafana sidecar가 이 라벨 붙은 ConfigMap을 자동으로 대시보드로 로드함
+    grafana_dashboard: "1"
+data:
+  account-service-golden-signals.json: |
+    {
+      "title": "account-service · Golden Signals",
+      "uid": "account-service-golden-signals",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Latency (p50 / p95 / p99)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            { "expr": "histogram_quantile(0.50, sum(rate(http_server_requests_seconds_bucket{job=\"account-service\"}[5m])) by (le))", "legendFormat": "p50" },
+            { "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"account-service\"}[5m])) by (le))", "legendFormat": "p95" },
+            { "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{job=\"account-service\"}[5m])) by (le))", "legendFormat": "p99" }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Traffic (requests/sec)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+          "targets": [
+            { "expr": "sum(rate(http_server_requests_seconds_count{job=\"account-service\"}[5m])) by (uri)", "legendFormat": "{{uri}}" }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Error rate (5xx %)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+          "targets": [
+            {
+              "expr": "100 * sum(rate(http_server_requests_seconds_count{job=\"account-service\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job=\"account-service\"}[5m])), 1e-9)",
+              "legendFormat": "5xx %"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Saturation (JVM heap / CPU / DB pool)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] },
+          "targets": [
+            { "expr": "sum(jvm_memory_used_bytes{job=\"account-service\",area=\"heap\"}) / sum(jvm_memory_max_bytes{job=\"account-service\",area=\"heap\"})", "legendFormat": "heap used" },
+            { "expr": "avg(process_cpu_usage{job=\"account-service\"})", "legendFormat": "cpu" },
+            { "expr": "sum(hikaricp_connections_active{job=\"account-service\"}) / sum(hikaricp_connections_max{job=\"account-service\"})", "legendFormat": "db pool" }
+          ]
+        }
+      ]
+    }
