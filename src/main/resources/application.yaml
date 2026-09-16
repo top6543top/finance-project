@@ -25,7 +25,7 @@ spring:
 
   data:
     redis:
-      host: ${REDIS_HOST}
+      host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
 # 토큰 버킷 방식 (IS-25) — capacity만큼 즉시 버스트를 허용하고, refill-period-seconds마다

@@ -13,6 +13,14 @@ spring:
 jwt:
   secret: test-only-jwt-secret-key-not-for-production-32bytes-min
   expiration-ms: 3600000
+
+# Redis 컨테이너가 JVM 전체에서 싱글턴으로 재사용돼 모든 테스트 클래스가 같은 IP 키의
+# 버킷을 공유한다 — 운영값(100/60s)이면 동시성 테스트(100 threads) 하나가 버킷을 소진시켜
+# 이후 실행되는 다른 통합테스트가 429로 실패한다. 테스트에서는 사실상 무제한으로 둔다.
+rate-limit:
+  capacity: 100000
+  refill-tokens: 100000
+  refill-period-seconds: 1
 # datasource/dialect는 일부러 안 씀:
 # - Testcontainers 미사용 테스트 -> Spring Boot가 H2를 자동 감지해서 방언까지 맞춰줌
 # - @ServiceConnection 쓰는 테스트 -> 컨테이너의 실제 MySQL 연결정보/방언을 그대로 사용

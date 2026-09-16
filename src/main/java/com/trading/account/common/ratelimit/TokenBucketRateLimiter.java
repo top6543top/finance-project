@@ -1,7 +1,6 @@
 package com.trading.account.common.ratelimit;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Component;
@@ -56,14 +55,11 @@ public class TokenBucketRateLimiter {
     private final int refillTokens;
     private final int refillPeriodSeconds;
 
-    public TokenBucketRateLimiter(StringRedisTemplate redisTemplate,
-                                   @Value("${rate-limit.capacity}") int capacity,
-                                   @Value("${rate-limit.refill-tokens}") int refillTokens,
-                                   @Value("${rate-limit.refill-period-seconds}") int refillPeriodSeconds) {
+    public TokenBucketRateLimiter(StringRedisTemplate redisTemplate, RateLimitProperties properties) {
         this.redisTemplate = redisTemplate;
-        this.capacity = capacity;
-        this.refillTokens = refillTokens;
-        this.refillPeriodSeconds = refillPeriodSeconds;
+        this.capacity = properties.capacity();
+        this.refillTokens = properties.refillTokens();
+        this.refillPeriodSeconds = properties.refillPeriodSeconds();
     }
 
     public boolean tryConsume(String clientKey) {
