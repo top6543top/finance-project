@@ -3,7 +3,6 @@ package com.trading.account.common.ratelimit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
-import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
@@ -12,8 +11,11 @@ import java.util.List;
 // 실제로 의미가 있다 (인스턴스별 로컬 카운터는 파드 수만큼 한도가 늘어나버림).
 // GET-then-SET이 아니라 Lua 스크립트 하나로 조회+갱신을 원자적으로 묶어야 동시 요청 사이에서
 // 토큰을 이중으로 소비하는 레이스 컨디션을 막을 수 있다 (Redis는 스크립트 실행 중 다른 명령을 끼워넣지 않음).
+//
+// 용도별로(일반 API / 로그인) 인스턴스를 따로 만들어 쓴다 — 로그인은 브루트포스 방지를 위해
+// 훨씬 좁은 한도가 필요한데, 일반 API와 버킷을 공유하면 그 한도에 맞춰 전체를 좁혀야 해서
+// 정상적인 거래 트래픽까지 막힌다. keyPrefix를 다르게 둬서 Redis 상의 버킷도 서로 분리한다.
 @Slf4j
-@Component
 public class TokenBucketRateLimiter {
 
     private static final String SCRIPT = """
@@ -48,25 +50,26 @@ public class TokenBucketRateLimiter {
             """;
 
     private static final RedisScript<Long> RATE_LIMIT_SCRIPT = RedisScript.of(SCRIPT, Long.class);
-    private static final String KEY_PREFIX = "rate-limit:";
 
     private final StringRedisTemplate redisTemplate;
+    private final String keyPrefix;
     private final int capacity;
     private final int refillTokens;
     private final int refillPeriodSeconds;
 
-    public TokenBucketRateLimiter(StringRedisTemplate redisTemplate, RateLimitProperties properties) {
+    public TokenBucketRateLimiter(StringRedisTemplate redisTemplate, String keyPrefix, RateLimitProperties.Bucket bucket) {
         this.redisTemplate = redisTemplate;
-        this.capacity = properties.capacity();
-        this.refillTokens = properties.refillTokens();
-        this.refillPeriodSeconds = properties.refillPeriodSeconds();
+        this.keyPrefix = keyPrefix;
+        this.capacity = bucket.capacity();
+        this.refillTokens = bucket.refillTokens();
+        this.refillPeriodSeconds = bucket.refillPeriodSeconds();
     }
 
     public boolean tryConsume(String clientKey) {
         try {
             Long allowed = redisTemplate.execute(
                     RATE_LIMIT_SCRIPT,
-                    List.of(KEY_PREFIX + clientKey),
+                    List.of(keyPrefix + clientKey),
                     String.valueOf(capacity),
                     String.valueOf(refillTokens),
                     String.valueOf(refillPeriodSeconds),

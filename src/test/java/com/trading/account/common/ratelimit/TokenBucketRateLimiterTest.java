@@ -3,6 +3,7 @@ package com.trading.account.common.ratelimit;
 import com.trading.account.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.List;
@@ -17,13 +18,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 // refill-period-seconds를 넉넉히 길게 잡아, 테스트 실행 중 자연 리필로 결과가 흔들리지 않게 한다.
 @SpringBootTest(properties = {
-        "rate-limit.capacity=5",
-        "rate-limit.refill-tokens=5",
-        "rate-limit.refill-period-seconds=3600"
+        "rate-limit.general.capacity=5",
+        "rate-limit.general.refill-tokens=5",
+        "rate-limit.general.refill-period-seconds=3600",
+        "rate-limit.login.capacity=5",
+        "rate-limit.login.refill-tokens=5",
+        "rate-limit.login.refill-period-seconds=3600"
 })
 class TokenBucketRateLimiterTest extends AbstractIntegrationTest {
 
     @Autowired
+    @Qualifier("generalRateLimiter")
     private TokenBucketRateLimiter rateLimiter;
 
     @Test

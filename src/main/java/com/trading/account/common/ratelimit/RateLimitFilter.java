@@ -7,9 +7,10 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -21,16 +22,27 @@ import java.io.IOException;
 // 인증/인가 처리 전에 걸러내고 — 429로 막힌 요청도 X-Request-Id로 로그 추적은 가능하게 한다.
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 1)
-@RequiredArgsConstructor
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private final TokenBucketRateLimiter rateLimiter;
+    private static final String LOGIN_URI = "/api/auth/login";
+
+    private final TokenBucketRateLimiter generalRateLimiter;
+    private final TokenBucketRateLimiter loginRateLimiter;
     private final ObjectMapper objectMapper;
+
+    public RateLimitFilter(@Qualifier("generalRateLimiter") TokenBucketRateLimiter generalRateLimiter,
+                            @Qualifier("loginRateLimiter") TokenBucketRateLimiter loginRateLimiter,
+                            ObjectMapper objectMapper) {
+        this.generalRateLimiter = generalRateLimiter;
+        this.loginRateLimiter = loginRateLimiter;
+        this.objectMapper = objectMapper;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String clientKey = resolveClientKey(request);
+        TokenBucketRateLimiter rateLimiter = isLoginRequest(request) ? loginRateLimiter : generalRateLimiter;
         if (!rateLimiter.tryConsume(clientKey)) {
             response.setStatus(ErrorCode.TOO_MANY_REQUESTS.getStatus().value());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -57,5 +69,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return forwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    // 로그인은 일반 API보다 훨씬 좁은 한도가 필요하다 (브루트포스 방지) — 하나의 버킷을
+    // 공유하면 그 좁은 한도에 맞춰 일반 거래 트래픽까지 같이 막히므로 버킷 자체를 분리한다.
+    private boolean isLoginRequest(HttpServletRequest request) {
+        return HttpMethod.POST.matches(request.getMethod()) && LOGIN_URI.equals(request.getRequestURI());
     }
 }
