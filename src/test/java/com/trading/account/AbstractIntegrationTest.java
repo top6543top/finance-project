@@ -2,7 +2,9 @@ package com.trading.account;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.utility.DockerImageName;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -29,8 +31,15 @@ public abstract class AbstractIntegrationTest {
     @ServiceConnection
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.0");
 
+    // 이미지 이름이 "redis"로 시작하면 Spring Boot가 GenericContainer도 spring.data.redis.*로
+    // 자동 연결해준다 (MySQL과 같은 @ServiceConnection 메커니즘) — 별도 RedisContainer 모듈 불필요.
+    @ServiceConnection("redis")
+    static final GenericContainer<?> REDIS = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+            .withExposedPorts(6379);
+
     static {
         MYSQL.start();
+        REDIS.start();
     }
 
     // 테이블 이름을 하드코딩하면 나중에 엔티티가 추가돼도 여기 안 늘리면 그 테이블만

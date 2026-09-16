@@ -23,6 +23,19 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+
+# 토큰 버킷 방식 (IS-25) — capacity만큼 즉시 버스트를 허용하고, refill-period-seconds마다
+# refill-tokens개씩 채워 평균 처리율을 제한. Fixed Window 대비 경계 순간 트래픽 몰림이 없고,
+# Leaky Bucket 대비 순간 버스트를 허용해 정상 사용자 체감이 덜 끊긴다.
+rate-limit:
+  capacity: ${RATE_LIMIT_CAPACITY:100}
+  refill-tokens: ${RATE_LIMIT_REFILL_TOKENS:100}
+  refill-period-seconds: ${RATE_LIMIT_REFILL_PERIOD_SECONDS:60}
+
 server:
   # SIGTERM 받아도 즉시 종료하지 않고, 처리 중인 요청을 끝낼 때까지 최대 20초 대기 (IS-34 무중단 배포)
   shutdown: graceful
