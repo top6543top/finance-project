@@ -15,8 +15,12 @@
 
 ## 1. API/게이트웨이 계층
 
-### Rate Limiting (요청 자체를 제한)
+### Rate Limiting (요청 자체를 제한) — IS-25 구현 완료
 서버까지 요청이 도달하기 전에 걸러낸다. 토큰 버킷(Token Bucket) 알고리즘이 표준 — 사용자/IP별로 "초당 N개 토큰"을 채워주고, 요청마다 토큰 하나를 소비. 토큰이 없으면 즉시 `429 Too Many Requests`.
+
+별도 API Gateway 서비스가 없는 모놀리식 구조라 `RateLimitFilter`(`common/ratelimit`)가 그 역할을 대신하며, 상태는 Redis에 둬서 k3s 다중 파드 사이에서도 같은 한도를 공유한다. 조회+차감을 Lua 스크립트 하나로 원자적으로 묶어 동시 요청의 이중 소비를 막았고(`TokenBucketRateLimiterTest`의 동시성 테스트로 검증), Redis 장애 시에는 fail-open(허용)으로 가용성을 우선한다. 클라이언트 키는 `X-Forwarded-For`(없으면 remoteAddr) 기반 IP — 로그인처럼 인증 전 호출도 보호 대상이라 JWT 대신 IP를 기본으로 뒀다.
+
+`/api/auth/login`은 일반 API와 버킷을 분리했다(`rate-limit.login.*`, 기본 IP당 60초 10개). 하나의 버킷을 공유하면 브루트포스 방지에 필요한 좁은 한도에 맞춰 정상 거래 트래픽까지 같이 막히기 때문. 다만 IP 기반 제한은 봇넷/프록시로 IP를 바꿔가며 시도하는 분산 공격은 막지 못한다 — 그런 공격에는 계정 단위 잠금(현재 미구현)이 따로 필요하다.
 ```
 사용자 A: 1초에 10개 토큰 리필, 버킷 최대 20개
 → 순간적으로 20개까지는 몰아서 보내도 되지만, 그 이상은 리필 속도(초당 10개)로 제한됨
@@ -146,7 +150,7 @@ Retry만 있고 Idempotency(`PRODUCTION_HARDENING_SPEC.md` IS-18)가 없으면 �
 
 ## 이슈 목록 (설계 메모만, 착수는 보류)
 
-- IS-25: API Gateway 레벨 Rate Limiting (Redis 토큰 버킷)
+- ~~IS-25: API Gateway 레벨 Rate Limiting (Redis 토큰 버킷)~~ → 구현 완료, 아래 참고
 - IS-26: Resilience4j Circuit Breaker + Bulkhead 도입 (외부/다운스트림 호출 지점 생기면)
 - IS-27: 거래이력 조회 Read Replica 라우팅 (`@Transactional(readOnly=true)` 메서드를 replica로)
 - IS-28: 정산 배치 (Spring Batch, 일 마감 대사 — 원장 합계 vs 실제 잔고 검증)
