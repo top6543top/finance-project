@@ -1,6 +1,15 @@
 spring:
   application:
     name: account
+  batch:
+    job:
+      # 꺼두지 않으면 Job 빈이 있는 모든 @SpringBootTest 컨텍스트 기동 시마다
+      # JobLauncherApplicationRunner가 정산 배치를 자동 실행해버려, 관련 없는 테스트까지
+      # 배치 부작용(로그, 배치 메타테이블 기록)을 떠안게 된다.
+      enabled: false
+    jdbc:
+      # 메인 설정과 동일한 이유 — Testcontainers MySQL도 임베디드가 아니라 명시 필요
+      initialize-schema: always
   jpa:
     hibernate:
       # create-drop 유지 — 컨텍스트가 바뀔 때(@DataJpaTest <-> @SpringBootTest 등) 이전 컨텍스트가

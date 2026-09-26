@@ -153,7 +153,7 @@ Retry만 있고 Idempotency(`PRODUCTION_HARDENING_SPEC.md` IS-18)가 없으면 �
 - ~~IS-25: API Gateway 레벨 Rate Limiting (Redis 토큰 버킷)~~ → 구현 완료, 아래 참고
 - IS-26: Resilience4j Circuit Breaker + Bulkhead 도입 (외부/다운스트림 호출 지점 생기면)
 - IS-27: 거래이력 조회 Read Replica 라우팅 (`@Transactional(readOnly=true)` 메서드를 replica로)
-- IS-28: 정산 배치 (Spring Batch, 일 마감 대사 — 원장 합계 vs 실제 잔고 검증)
+- ~~IS-28: 정산 배치 (Spring Batch, 일 마감 대사 — 원장 합계 vs 실제 잔고 검증)~~ → 구현 완료 (`domain/reconciliation`)
 - IS-29: 분산 트레이싱 (OpenTelemetry + Jaeger, IS-19 Correlation ID 확장)
 
 ## 면접 예상 질문

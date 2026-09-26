@@ -2,6 +2,7 @@ package com.trading.account.domain.transaction;
 
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
+import com.trading.account.common.logging.AccountNumberMasker;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.account.AccountService;
@@ -49,7 +50,7 @@ public class TransactionService {
         increaseBalance(account, amount);
         TransactionHistory history = transactionHistoryRepository.save(
                 new TransactionHistory(null, account, amount, TransactionType.DEPOSIT));
-        log.info("입금 완료: account={}, amount={}", mask(accountNumber), amount);
+        log.info("입금 완료: account={}, amount={}", AccountNumberMasker.mask(accountNumber), amount);
         return toTransactionResDto(account, currentBalance(account), amount, TransactionType.DEPOSIT, history.getCreatedAt());
     }
 
@@ -61,13 +62,13 @@ public class TransactionService {
         decreaseBalanceIfEnough(account, amount);
         TransactionHistory history = transactionHistoryRepository.save(
                 new TransactionHistory(account, null, amount, TransactionType.WITHDRAW));
-        log.info("출금 완료: account={}, amount={}", mask(accountNumber), amount);
+        log.info("출금 완료: account={}, amount={}", AccountNumberMasker.mask(accountNumber), amount);
         return toTransactionResDto(account, currentBalance(account), amount, TransactionType.WITHDRAW, history.getCreatedAt());
     }
 
     @Recover
     public TransactionResDto recoverDepositOrWithdraw(ConcurrencyFailureException e, String accountNumber, Long requesterId, BigDecimal amount) {
-        log.warn("동시성 충돌로 {}회 재시도 후에도 처리 실패: account={}", MAX_RETRY_ATTEMPTS, mask(accountNumber));
+        log.warn("동시성 충돌로 {}회 재시도 후에도 처리 실패: account={}", MAX_RETRY_ATTEMPTS, AccountNumberMasker.mask(accountNumber));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
     }
 
@@ -117,14 +118,14 @@ public class TransactionService {
         TransactionHistory history = transactionHistoryRepository.save(
                 new TransactionHistory(from, to, request.amount(), TransactionType.TRANSFER));
 
-        log.info("이체 완료: from={}, to={}, amount={}", mask(from.getAccountNumber()), mask(to.getAccountNumber()), request.amount());
+        log.info("이체 완료: from={}, to={}, amount={}", AccountNumberMasker.mask(from.getAccountNumber()), AccountNumberMasker.mask(to.getAccountNumber()), request.amount());
         return new TransferResDto(from.getAccountNumber(), to.getAccountNumber(), request.amount(), history.getCreatedAt());
     }
 
     @Recover
     public TransferResDto recoverTransfer(ConcurrencyFailureException e, TransferReqDto request, Long requesterId) {
         log.warn("동시성 충돌로 {}회 재시도 후에도 이체 실패: from={}, to={}",
-                MAX_RETRY_ATTEMPTS, mask(request.fromAccountNumber()), mask(request.toAccountNumber()));
+                MAX_RETRY_ATTEMPTS, AccountNumberMasker.mask(request.fromAccountNumber()), AccountNumberMasker.mask(request.toAccountNumber()));
         throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
     }
 
@@ -164,13 +165,5 @@ public class TransactionService {
 
     private TransactionResDto toTransactionResDto(Account account, BigDecimal balance, BigDecimal amount, TransactionType type, LocalDateTime createdAt) {
         return new TransactionResDto(account.getAccountNumber(), balance, amount, type, createdAt);
-    }
-
-    // 계좌번호 뒷자리만 남기고 마스킹 (금융 도메인 로그에 전체 계좌번호 노출 금지)
-    private String mask(String accountNumber) {
-        if (accountNumber.length() < 4) {
-            return "***";
-        }
-        return "***-***-" + accountNumber.substring(accountNumber.length() - 4);
     }
 }
