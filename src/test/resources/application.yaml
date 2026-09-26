@@ -8,7 +8,9 @@ spring:
       # 배치 부작용(로그, 배치 메타테이블 기록)을 떠안게 된다.
       enabled: false
     jdbc:
-      # 메인 설정과 동일한 이유 — Testcontainers MySQL도 임베디드가 아니라 명시 필요
+      # Testcontainers MySQL은 임베디드 DB가 아니라 always를 명시해야 BATCH_* 테이블이 생긴다.
+      # always는 "없을 때만 생성"이 아니라 기동마다 CREATE 스크립트를 전부 실행하고 "이미 있음"
+      # 에러를 무시(continueOnError)하는 방식 — 권한 부족 같은 진짜 실패도 조용히 묻히므로 prod엔 안 씀.
       initialize-schema: always
   jpa:
     hibernate:
@@ -18,6 +20,12 @@ spring:
       # 컨테이너를 싱글턴으로 공유한 뒤로 컨텍스트 경계에서 서로 드롭이 겹쳐 FK drop ERROR 로그가
       # 남지만(HHH000478) 빌드엔 영향 없음 — 로그 노이즈보다 데이터 격리가 우선.
       ddl-auto: create-drop
+
+# 정산 스케줄러 off — CI(UTC)가 01:00에 돌면 테스트 도중 배치가 끼어들어 cleanDatabase의
+# TRUNCATE와 충돌한다. 배치 테스트는 JobLauncherTestUtils로 직접 실행.
+reconciliation:
+  scheduler:
+    enabled: false
 
 jwt:
   secret: test-only-jwt-secret-key-not-for-production-32bytes-min

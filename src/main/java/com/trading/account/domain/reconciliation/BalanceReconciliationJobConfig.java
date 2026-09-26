@@ -51,18 +51,26 @@ public class BalanceReconciliationJobConfig {
                 .build();
     }
 
+    // ponytail: @StepScope 아님 — 같은 Job이 동시에 두 번 돌면 페이지 상태를 공유한다. 지금은
+    // 스케줄러(영업일 파라미터로 중복 차단)만 실행하므로 안전. 수동 실행 API가 생기면 @StepScope @Bean으로.
+    // ponytail: OFFSET 페이징 + 페이지마다 count 쿼리 — 계좌 수가 커지면 keyset 페이징으로.
     private RepositoryItemReader<Account> accountReader(AccountRepository accountRepository) {
         RepositoryItemReader<Account> reader = new RepositoryItemReader<>();
         reader.setRepository(accountRepository);
         reader.setMethodName("findAll");
         reader.setSort(Map.of("id", Sort.Direction.ASC));
+        // 페이지 = 청크여야 잔고 읽기(Reader)와 이력 합계(Processor)가 항상 같은 청크 트랜잭션,
+        // 즉 같은 REPEATABLE READ 스냅샷에서 일어난다. 어긋나면 한 페이지가 두 트랜잭션에 걸쳐
+        // 그 사이 들어온 이체 때문에 멀쩡한 계좌를 불일치로 오판할 수 있다.
+        reader.setPageSize(CHUNK_SIZE);
         return reader;
     }
 
     private ItemWriter<BalanceMismatch> mismatchLogWriter() {
         return chunk -> chunk.getItems().forEach(mismatch ->
-                log.warn("잔고 불일치 발견: account={}, 실제잔고={}, 거래이력합계={}",
-                        AccountNumberMasker.mask(mismatch.accountNumber()),
-                        mismatch.actualBalance(), mismatch.expectedBalance()));
+                // 잔고 자체는 민감정보라 차이값만 남긴다 — 실제 잔고는 권한 있는 사람이 DB에서 조회
+                log.warn("잔고 불일치 발견: accountId={}, account={}, 차이={}",
+                        mismatch.accountId(), AccountNumberMasker.mask(mismatch.accountNumber()),
+                        mismatch.actualBalance().subtract(mismatch.expectedBalance())));
     }
 }

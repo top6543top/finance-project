@@ -42,6 +42,7 @@ class BalanceReconciliationProcessorTest {
         BalanceMismatch result = processor.process(account);
 
         assertThat(result).isNotNull();
+        assertThat(result.accountId()).isEqualTo(2L);
         assertThat(result.accountNumber()).isEqualTo("123-456-78911");
         assertThat(result.actualBalance()).isEqualByComparingTo(BigDecimal.valueOf(1000));
         assertThat(result.expectedBalance()).isEqualByComparingTo(BigDecimal.valueOf(700));

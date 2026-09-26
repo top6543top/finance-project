@@ -18,9 +18,11 @@ public class BalanceReconciliationProcessor implements ItemProcessor<Account, Ba
 
     @Override
     public BalanceMismatch process(Account account) {
+        // ponytail: 계좌마다 전체 이력 SUM — 이력이 커져 배치가 수십 분 걸리면
+        // 일별 확정 잔고 스냅샷(대사 통과한 값만) + 당일 순액으로 전환
         BigDecimal expected = transactionHistoryRepository.calculateNetAmount(account.getId());
         BigDecimal actual = account.getBalance();
         // 일치하면 null 반환 -> Spring Batch가 이 아이템을 writer로 넘기지 않고 그냥 건너뜀
-        return actual.compareTo(expected) == 0 ? null : new BalanceMismatch(account.getAccountNumber(), actual, expected);
+        return actual.compareTo(expected) == 0 ? null : new BalanceMismatch(account.getId(), account.getAccountNumber(), actual, expected);
     }
 }

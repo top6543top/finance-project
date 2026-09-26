@@ -51,7 +51,10 @@ public abstract class AbstractIntegrationTest {
              Statement stmt = conn.createStatement()) {
             List<String> tables = new ArrayList<>();
             try (ResultSet rs = stmt.executeQuery(
-                    "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()")) {
+                    // BATCH_*는 제외: MySQL용 Spring Batch는 BATCH_JOB_SEQ 등 시퀀스 테이블의 단일 행을
+                    // 증가시켜 ID를 만든다. 그 행을 지우면 한 테스트에서 Job을 두 번 돌릴 때 ID가 겹쳐 PK 충돌.
+                    "SELECT table_name FROM information_schema.tables "
+                            + "WHERE table_schema = DATABASE() AND table_name NOT LIKE 'BATCH\\_%'")) {
                 while (rs.next()) {
                     tables.add(rs.getString(1));
                 }

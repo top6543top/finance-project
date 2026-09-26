@@ -33,12 +33,10 @@ spring:
       # @Scheduled가 직접 JobLauncher.run()을 호출하므로, 애플리케이션 기동 시 자동 실행되는
       # Spring Boot 기본 JobLauncherApplicationRunner는 꺼둔다 (안 끄면 기동할 때마다 한 번 더 돈다)
       enabled: false
-    jdbc:
-      # Spring Batch 메타데이터 테이블(BATCH_JOB_INSTANCE 등)은 임베디드 DB에만 자동 생성됨 —
-      # MySQL처럼 임베디드가 아닌 DB에서는 always로 명시해야 생성된다. Spring Boot 초기화기가
-      # 기동마다 테이블 존재 여부를 먼저 확인하고 없을 때만 스크립트를 실행하므로 always로
-      # 둬도 매번 재실행되며 오류 나는 게 아니라 최초 1회만 실제로 생성됨(idempotent).
-      initialize-schema: always
+    # jdbc.initialize-schema는 여기 두지 않는다 — 기본값(embedded)이면 MySQL에선 아무것도 안 함.
+    # prod의 BATCH_* 메타테이블은 spring-batch-core jar의
+    # org/springframework/batch/core/schema-mysql.sql로 한 번만 수동 생성(스키마 변경 이력 추적).
+    # local/test만 always (각 프로필 yaml 참고).
 
 # 토큰 버킷 방식 (IS-25) — capacity만큼 즉시 버스트를 허용하고, refill-period-seconds마다
 # refill-tokens개씩 채워 평균 처리율을 제한. Fixed Window 대비 경계 순간 트래픽 몰림이 없고,
