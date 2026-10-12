@@ -1,76 +1,93 @@
 package com.trading.account.domain.reconciliation;
 
-import com.trading.account.common.logging.AccountNumberMasker;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
+import org.springframework.batch.core.*;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.batch.item.ItemWriter;
 import org.springframework.batch.item.data.RepositoryItemReader;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.domain.Sort;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.interceptor.DefaultTransactionAttribute;
 
 import java.util.Map;
 
-// 일 마감 대사(Reconciliation, IS-28) — 매일 밤 전체 계좌를 순회하며 Account.balance와
-// TransactionHistory 합계가 어긋난 곳이 있는지 검증한다. 불일치를 자동으로 고치지 않고
-// 로그만 남기는 이유: 배치가 balance를 임의로 덮어쓰면 그 자체가 새로운 사고 원인이 될 수
-// 있어, 사람이 확인할 리포트만 남기는 게 금융권 대사 배치의 관행.
+/** Current consistency scan, not a historical closing balance or business-day settlement. */
 @Slf4j
 @Configuration
 public class BalanceReconciliationJobConfig {
-
     private static final int CHUNK_SIZE = 100;
 
     @Bean
-    public Job balanceReconciliationJob(JobRepository jobRepository, Step balanceReconciliationStep) {
-        return new JobBuilder("balanceReconciliationJob", jobRepository)
-                .start(balanceReconciliationStep)
-                .build();
+    public Job balanceReconciliationJob(JobRepository repository, Step balanceReconciliationStep,
+                                       ReconciliationResults results) {
+        return new JobBuilder("balanceReconciliationJob", repository)
+                .validator(parameters -> {
+                    if (parameters.getLocalDate("scheduleDate") == null) {
+                        throw new JobParametersInvalidException("scheduleDate (Asia/Seoul scheduling date) is required");
+                    }
+                })
+                .listener(new JobExecutionListener() {
+                    @Override public void beforeJob(JobExecution execution) { results.started(execution); }
+                    @Override public void afterJob(JobExecution execution) {
+                        try {
+                            results.finished(execution);
+                        } catch (RuntimeException failure) {
+                            // Batch swallows listener exceptions; explicitly fail the execution as well.
+                            execution.setStatus(BatchStatus.FAILED);
+                            execution.setExitStatus(ExitStatus.FAILED.addExitDescription("Reconciliation result persistence failed"));
+                            log.error("Reconciliation result persistence failed: runId={}, errorType={}",
+                                    execution.getId(), failure.getClass().getSimpleName());
+                        }
+                    }
+                })
+                .start(balanceReconciliationStep).build();
     }
 
     @Bean
-    public Step balanceReconciliationStep(JobRepository jobRepository, PlatformTransactionManager transactionManager,
-                                           AccountRepository accountRepository,
-                                           BalanceReconciliationProcessor balanceReconciliationProcessor) {
-        // 비즈니스 데이터는 읽기만 하지만 청크 트랜잭션을 readOnly로 두면 안 된다 — Spring Batch가
-        // 청크마다 같은 트랜잭션 안에서 BATCH_STEP_EXECUTION(_CONTEXT)에 진행 상태를 UPDATE하기 때문.
-        // readOnly로 두면 MySQL이 "Connection is read-only"로 거부해 스텝이 FAILED 된다
-        // (Testcontainers 통합테스트에서 실제로 재현됨).
-        return new StepBuilder("balanceReconciliationStep", jobRepository)
+    public Step balanceReconciliationStep(JobRepository repository, PlatformTransactionManager transactionManager,
+                                         RepositoryItemReader<Account> reconciliationAccountReader,
+                                         BalanceReconciliationProcessor processor, ItemWriter<BalanceMismatch> balanceMismatchWriter) {
+        DefaultTransactionAttribute transaction = new DefaultTransactionAttribute() {
+            @Override public boolean rollbackOn(Throwable failure) { return true; }
+        };
+        // Same MySQL snapshot for account reads and ledger sums within each chunk, independent of server defaults.
+        // Remains writable because Batch checkpoints and mismatch evidence commit with the chunk.
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        return new StepBuilder("balanceReconciliationStep", repository)
                 .<Account, BalanceMismatch>chunk(CHUNK_SIZE, transactionManager)
-                .reader(accountReader(accountRepository))
-                .processor(balanceReconciliationProcessor)
-                .writer(mismatchLogWriter())
-                .build();
+                .transactionAttribute(transaction)
+                .reader(reconciliationAccountReader).processor(processor).writer(balanceMismatchWriter).build();
     }
 
-    // ponytail: @StepScope 아님 — 같은 Job이 동시에 두 번 돌면 페이지 상태를 공유한다. 지금은
-    // 스케줄러(영업일 파라미터로 중복 차단)만 실행하므로 안전. 수동 실행 API가 생기면 @StepScope @Bean으로.
-    // ponytail: OFFSET 페이징 + 페이지마다 count 쿼리 — 계좌 수가 커지면 keyset 페이징으로.
-    private RepositoryItemReader<Account> accountReader(AccountRepository accountRepository) {
+    @Bean
+    @StepScope
+    public RepositoryItemReader<Account> reconciliationAccountReader(AccountRepository repository) {
         RepositoryItemReader<Account> reader = new RepositoryItemReader<>();
-        reader.setRepository(accountRepository);
+        reader.setName("reconciliationAccountReader");
+        reader.setRepository(repository);
         reader.setMethodName("findAll");
         reader.setSort(Map.of("id", Sort.Direction.ASC));
-        // 페이지 = 청크여야 잔고 읽기(Reader)와 이력 합계(Processor)가 항상 같은 청크 트랜잭션,
-        // 즉 같은 REPEATABLE READ 스냅샷에서 일어난다. 어긋나면 한 페이지가 두 트랜잭션에 걸쳐
-        // 그 사이 들어온 이체 때문에 멀쩡한 계좌를 불일치로 오판할 수 있다.
         reader.setPageSize(CHUNK_SIZE);
+        // A retry is a new observation with a new run id: revisit all accounts, not just the uncommitted tail.
+        reader.setSaveState(false);
+        // ponytail: OFFSET pages and per-account lifetime SUM are bounded-memory, but ledger growth costs time.
+        // Add immutable snapshots/keyset aggregates only after measured scan-duration pressure.
         return reader;
     }
 
-    private ItemWriter<BalanceMismatch> mismatchLogWriter() {
-        return chunk -> chunk.getItems().forEach(mismatch ->
-                // 잔고 자체는 민감정보라 차이값만 남긴다 — 실제 잔고는 권한 있는 사람이 DB에서 조회
-                log.warn("잔고 불일치 발견: accountId={}, account={}, 차이={}",
-                        mismatch.accountId(), AccountNumberMasker.mask(mismatch.accountNumber()),
-                        mismatch.actualBalance().subtract(mismatch.expectedBalance())));
+    @Bean
+    @StepScope
+    public ItemWriter<BalanceMismatch> balanceMismatchWriter(ReconciliationResults results,
+                         @Value("#{stepExecution.jobExecution.id}") Long runId) {
+        return chunk -> { if (!chunk.isEmpty()) results.write(runId, chunk); };
     }
 }
