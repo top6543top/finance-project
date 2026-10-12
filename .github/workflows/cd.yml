@@ -1,64 +1,100 @@
-name: CD Pipeline
-
+name: Verified Release
 on:
   push:
     branches: [master]
-
+  workflow_dispatch:
+    inputs:
+      maintenance_window:
+        description: "Approved downtime, backup checked, all other schedulers stopped"
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: account-production-release
+  cancel-in-progress: false
 env:
-  ECR_REPOSITORY: 982248023836.dkr.ecr.ap-northeast-2.amazonaws.com/account-service
-  AWS_REGION: ap-northeast-2
-
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
   build:
+    needs: test
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+          cache: gradle
+      - name: Build exact tested commit
+        run: |
+          chmod +x gradlew
+          ./gradlew bootJar --no-daemon
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push image
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Push SHA image and resolve immutable digest
+        id: image
+        shell: bash
         run: |
-          docker build -t $ECR_REPOSITORY:${{ github.sha }} -t $ECR_REPOSITORY:latest .
-          docker push $ECR_REPOSITORY:${{ github.sha }}
-          docker push $ECR_REPOSITORY:latest
-
+          set -euo pipefail
+          test -n "$ECR_REPOSITORY"
+          docker build -t "$ECR_REPOSITORY:$GITHUB_SHA" .
+          docker push "$ECR_REPOSITORY:$GITHUB_SHA"
+          digest=$(aws ecr describe-images --repository-name "${ECR_REPOSITORY#*/}" --image-ids "imageTag=$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text)
+          echo "image=$ECR_REPOSITORY@$digest" >> "$GITHUB_OUTPUT"
   deploy:
+    if: github.event_name == 'workflow_dispatch' && inputs.maintenance_window
     needs: build
     runs-on: self-hosted
+    environment: production
     env:
       KUBECONFIG: /home/ubuntu/.kube/config
+      ACCOUNT_NAMESPACE: default
+      ACCOUNT_IMAGE: ${{ needs.build.outputs.image }}
+      ACCOUNT_PUBLIC_HOST: ${{ vars.ACCOUNT_PUBLIC_HOST }}
+      MIGRATION_JOB_NAME: account-migrate-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Apply DB secret
-        # 값은 git에 올리지 않고 GitHub Actions Secrets에서 주입 — kubectl create --dry-run=client | apply는 있으면 갱신, 없으면 생성
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      - name: Verify current master and prerequisites
+        shell: bash
         run: |
-          kubectl create secret generic account-db-secret \
-            --from-literal=SPRING_DATASOURCE_URL="jdbc:mysql://account-db.cdy2e0qkmw4t.ap-northeast-2.rds.amazonaws.com:3306/account?serverTimezone=Asia/Seoul&characterEncoding=UTF-8" \
-            --from-literal=SPRING_DATASOURCE_USERNAME=admin \
-            --from-literal=SPRING_DATASOURCE_PASSWORD="$DB_PASSWORD" \
-            --from-literal=SPRING_PROFILES_ACTIVE=prod \
-            --from-literal=JWT_SECRET="$JWT_SECRET" \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Apply k8s manifests
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/master
+          test "$(git ls-remote origin refs/heads/master | cut -f1)" = "$GITHUB_SHA"
+          kubectl -n "$ACCOUNT_NAMESPACE" get secret account-runtime-secret account-migration-secret account-tls ecr-secret >/dev/null
+          kubectl -n "$ACCOUNT_NAMESPACE" get hpa -o json | python3 -c 'import json,sys; h=json.load(sys.stdin)["items"]; sys.exit(1 if any(x["spec"]["scaleTargetRef"]["name"] == "account-service" for x in h) else 0)'
+          python3 scripts/render_manifests.py --output release.yaml
+          python3 scripts/render_manifests.py --kind migration --output migration.yaml
+          kubectl apply --dry-run=server -f release.yaml >/dev/null
+          kubectl apply --dry-run=server -f migration.yaml >/dev/null
+          kubectl apply --dry-run=server -f k8s/servicemonitor.yaml -f k8s/prometheusrule.yaml -f k8s/grafana-dashboard.yaml >/dev/null
+      - name: Controlled maintenance and schema migration
+        shell: bash
         run: |
-          kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml -f k8s/ingress.yaml \
-            -f k8s/servicemonitor.yaml -f k8s/grafana-dashboard.yaml -f k8s/prometheusrule.yaml
-
-      - name: Deploy to k3s
+          set -euo pipefail
+          deployment=$(kubectl -n "$ACCOUNT_NAMESPACE" get deployment account-service --ignore-not-found -o name)
+          if [ -n "$deployment" ]; then
+            kubectl -n "$ACCOUNT_NAMESPACE" scale deployment account-service --replicas=0
+            kubectl -n "$ACCOUNT_NAMESPACE" wait --for=delete pod -l app=account-service --timeout=180s
+          fi
+          test -z "$(kubectl -n "$ACCOUNT_NAMESPACE" get pods -l app=account-service -o name)"
+          kubectl apply -f migration.yaml
+          kubectl -n "$ACCOUNT_NAMESPACE" wait --for=condition=complete "job/$MIGRATION_JOB_NAME" --timeout=300s
+      - name: Apply only verified digest and wait for app readiness
+        shell: bash
         run: |
-          kubectl set image deployment/account-service \
-            account-service=${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          kubectl rollout status deployment/account-service --timeout=120s
+          set -euo pipefail
+          kubectl apply -f release.yaml
+          kubectl apply -f k8s/servicemonitor.yaml -f k8s/prometheusrule.yaml -f k8s/grafana-dashboard.yaml
+          kubectl -n "$ACCOUNT_NAMESPACE" rollout status deployment/account-service --timeout=240s
+          kubectl -n "$ACCOUNT_NAMESPACE" get deployment account-service -o jsonpath='{.spec.template.spec.containers[0].image}'
