@@ -92,19 +92,19 @@ class RateLimitFilterTest {
 
     @Test
     void actuator_경로는_필터를_건너뛴다() {
-        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/health");
         request.setRequestURI("/actuator/health");
 
         assertThat(filter.shouldNotFilter(request)).isTrue();
     }
 
     @Test
-    void XForwardedFor_헤더가_있으면_첫번째_IP를_클라이언트_키로_쓴다() {
+    void XForwardedFor_헤더가_있어도_remoteAddr를_클라이언트_키로_쓴다() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Forwarded-For", "203.0.113.5, 10.0.0.1");
         request.setRemoteAddr("10.0.0.1");
 
-        assertThat(filter.resolveClientKey(request)).isEqualTo("203.0.113.5");
+        assertThat(filter.resolveClientKey(request)).isEqualTo("10.0.0.1");
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.trading.account.common.ratelimit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.trading.account.common.exception.ErrorCode;
+import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.response.ApiResponse;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -43,11 +44,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String clientKey = resolveClientKey(request);
         TokenBucketRateLimiter rateLimiter = isLoginRequest(request) ? loginRateLimiter : generalRateLimiter;
-        if (!rateLimiter.tryConsume(clientKey)) {
-            response.setStatus(ErrorCode.TOO_MANY_REQUESTS.getStatus().value());
-            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.setCharacterEncoding("UTF-8");
-            response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.error(ErrorCode.TOO_MANY_REQUESTS)));
+        try {
+            if (!rateLimiter.tryConsume(clientKey)) {
+                writeError(response, ErrorCode.TOO_MANY_REQUESTS, rateLimiter.getRetryAfterSeconds());
+                return;
+            }
+        } catch (CustomException e) {
+            if (e.getErrorCode() != ErrorCode.RATE_LIMIT_UNAVAILABLE) throw e;
+            writeError(response, ErrorCode.RATE_LIMIT_UNAVAILABLE, 1);
             return;
         }
         filterChain.doFilter(request, response);
@@ -55,20 +59,26 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // readinessProbe/livenessProbe(IS-34)가 같은 파드 IP에서 짧은 주기로 반복 호출되므로
-        // rate limit에 걸리면 파드가 오탐으로 재시작될 수 있어 헬스체크/메트릭은 대상에서 제외.
-        return request.getRequestURI().startsWith("/actuator");
+        // Probe/metrics availability must not depend on the request limiter. SecurityConfig
+        // still controls access to Actuator details and to the dedicated metrics port.
+        String path = request.getRequestURI();
+        return HttpMethod.GET.matches(request.getMethod())
+                && (path.equals("/livez") || path.equals("/readyz")
+                || path.equals("/actuator/health") || path.equals("/actuator/prometheus"));
     }
 
-    // 로드밸런서/인그레스 뒤에서는 client socket이 아니라 X-Forwarded-For의 원발신 IP로 제한해야
-    // 실제 클라이언트별 제한이 된다. 헤더는 클라이언트가 위조할 수 있어 인증(JWT) 기반 제한이 더
-    // 정확하지만, 로그인 API 자체도 보호 대상이라 인증 여부와 무관하게 걸리는 IP 기반을 기본으로 둔다.
+    // Forwarded headers are untrusted input. Keep server.forward-headers-strategy=none:
+    // NAT/proxy clients deliberately share a bucket until a trusted edge enforces per-client limits.
     String resolveClientKey(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",")[0].trim();
-        }
         return request.getRemoteAddr();
+    }
+
+    private void writeError(HttpServletResponse response, ErrorCode error, int retryAfterSeconds) throws IOException {
+        response.setStatus(error.getStatus().value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        response.setHeader("Retry-After", String.valueOf(Math.max(1, retryAfterSeconds)));
+        response.getWriter().write(objectMapper.writeValueAsString(ApiResponse.error(error)));
     }
 
     // 로그인은 일반 API보다 훨씬 좁은 한도가 필요하다 (브루트포스 방지) — 하나의 버킷을

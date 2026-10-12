@@ -26,8 +26,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String header = request.getHeader(HEADER);
         if (header != null && header.startsWith(PREFIX)) {
             String token = header.substring(PREFIX.length());
-            if (jwtTokenProvider.validateToken(token)) {
-                Long memberId = jwtTokenProvider.getMemberId(token);
+            // Verify signature, expiry and subject together, once, so malformed claims stay anonymous.
+            Long memberId = jwtTokenProvider.getMemberId(token);
+            if (memberId != null) {
                 var authentication = new UsernamePasswordAuthenticationToken(memberId, null, List.of());
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             }

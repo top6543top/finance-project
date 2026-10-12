@@ -2,6 +2,7 @@ package com.trading.account.common.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,11 +17,13 @@ public class JwtTokenProvider {
 
     private final SecretKey key;
     private final long expirationMs;
+    private final JwtParser parser;
 
     public JwtTokenProvider(@Value("${jwt.secret}") String secret,
                              @Value("${jwt.expiration-ms}") long expirationMs) {
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
+        this.parser = Jwts.parser().verifyWith(key).build();
     }
 
     public String generateToken(Long memberId, String email) {
@@ -36,27 +39,20 @@ public class JwtTokenProvider {
     }
 
     public Long getMemberId(String token) {
-        return Long.valueOf(parseClaims(token).getSubject());
+        try {
+            Claims claims = parser.parseSignedClaims(token).getPayload();
+            if (claims.getExpiration() == null) {
+                return null;
+            }
+            Long memberId = Long.valueOf(claims.getSubject());
+            return memberId > 0 ? memberId : null;
+        } catch (JwtException | IllegalArgumentException e) {
+            return null;
+        }
     }
 
     public long getExpirationMs() {
         return expirationMs;
     }
 
-    public boolean validateToken(String token) {
-        try {
-            parseClaims(token);
-            return true;
-        } catch (JwtException | IllegalArgumentException e) {
-            return false;
-        }
-    }
-
-    private Claims parseClaims(String token) {
-        return Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-    }
 }
