@@ -1,0 +1,12 @@
+# Learning/demo deposits require explicit local opt-in.
+spring:
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+ledger:
+  simulated-deposits-enabled: ${SIMULATED_DEPOSITS_ENABLED:false}
+app:
+  security:
+    public-docs: true
