@@ -4,70 +4,117 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
-import lombok.RequiredArgsConstructor;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.util.function.Supplier;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.function.Function;
 
 @Service
-@RequiredArgsConstructor
 public class IdempotencyService {
-
     private final IdempotencyKeyRepository repository;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate transaction;
+    private final RetryTemplate retry = RetryTemplate.builder().maxAttempts(5)
+            .exponentialBackoff(50, 2, 400, true).retryOn(ConcurrencyFailureException.class).build();
 
-    // Idempotency-Key로 action을 딱 한 번만 실행시킨다.
-    // 같은 키로 또 들어오면: 이미 끝났으면 그때 응답을 그대로 돌려주고, 아직 처리 중이면 409로 거절한다.
-    public <T> T execute(String key, Class<T> responseType, Supplier<T> action) {
-        try {
-            repository.save(new IdempotencyKey(key));
-        } catch (DataIntegrityViolationException e) {
-            return replayOrReject(key, responseType);
+    public IdempotencyService(IdempotencyKeyRepository repository, ObjectMapper objectMapper,
+                              PlatformTransactionManager transactionManager) {
+        this.repository = repository;
+        this.objectMapper = objectMapper;
+        this.transaction = new TransactionTemplate(transactionManager);
+        this.transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+    }
+
+    public <T> T execute(Long actorId, String key, String operation, Object canonicalRequest,
+                         Class<T> responseType, Function<IdempotencyKey, T> action) {
+        if (actorId == null || actorId <= 0 || key == null || !key.matches("[A-Za-z0-9._:-]{1,100}")) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
         }
-
+        String fingerprint = fingerprint(canonicalRequest);
         try {
-            T result = action.get();
-            complete(key, result);
-            return result;
-        } catch (RuntimeException e) {
-            // 실패한 요청은 아무 부작용도 안 남았으므로 행을 지워서 같은 키로 재시도 가능하게 둔다.
-            // deleteByKey(파생 쿼리)는 SimpleJpaRepository 소속이 아니라 자체 @Transactional이
-            // 없어서 앰비언트 트랜잭션 밖(컨트롤러 호출)에서 단독 실행하면 예외가 난다 —
-            // save/delete(entity)처럼 SimpleJpaRepository가 직접 제공하는 메서드만 단독 호출이 안전하다.
-            repository.findByKey(key).ifPresent(repository::delete);
-            throw e;
+            // Retry surrounds commit too: no attempt can reuse a rollback-only transaction.
+            return retry.execute(context -> executeAttempt(actorId, key, operation, fingerprint, responseType, action));
+        } catch (ConcurrencyFailureException ex) {
+            throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
         }
     }
 
-    private <T> T replayOrReject(String key, Class<T> responseType) {
-        IdempotencyKey existing = repository.findByKey(key)
-                .orElseThrow(() -> new CustomException(ErrorCode.INTERNAL_SERVER_ERROR));
-        if (existing.getStatus() != IdempotencyStatus.COMPLETED) {
+    private <T> T executeAttempt(Long actorId, String key, String operation, String fingerprint,
+                                 Class<T> type, Function<IdempotencyKey, T> action) {
+        try {
+            return transaction.execute(status -> {
+                // Legacy caches lack reliable actor/request attribution. Never execute their unknown request twice.
+                if (repository.existsByActorIdAndLegacyKey(0L, key)) {
+                    throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REUSED);
+                }
+                var existing = repository.findByActorIdAndKey(actorId, key);
+                if (existing.isPresent()) return replay(existing.get(), operation, fingerprint, type);
+
+                // MySQL's named unique constraint serializes simultaneous claims for the same actor/key.
+                IdempotencyKey claim = repository.saveAndFlush(new IdempotencyKey(actorId, key, operation, fingerprint));
+                T result = action.apply(claim);
+                claim.complete(serialize(result));
+                repository.flush();
+                return result;
+            });
+        } catch (DataIntegrityViolationException ex) {
+            if (!isClaimConflict(ex)) throw ex;
+            // A uniqueness error poisons its transaction: read only after rollback, using a fresh snapshot.
+            return transaction.execute(status -> replay(repository.findByActorIdAndKey(actorId, key)
+                    .orElseThrow(() -> new CustomException(ErrorCode.INTERNAL_SERVER_ERROR)), operation, fingerprint, type));
+        }
+    }
+
+    static boolean isClaimConflict(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation
+                    && violation.getErrorCode() == 1062 && "23000".equals(violation.getSQLState())) {
+                String constraint = violation.getConstraintName();
+                return constraint != null && (constraint.equals("uk_idempotency_actor_key")
+                        || constraint.endsWith(".uk_idempotency_actor_key"));
+            }
+        }
+        return false;
+    }
+
+    private <T> T replay(IdempotencyKey claim, String operation, String fingerprint, Class<T> type) {
+        if (!claim.getOperation().equals(operation) || !claim.getRequestFingerprint().equals(fingerprint)) {
+            throw new CustomException(ErrorCode.IDEMPOTENCY_KEY_REUSED);
+        }
+        if (claim.getStatus() != IdempotencyStatus.COMPLETED) {
             throw new CustomException(ErrorCode.IDEMPOTENCY_REQUEST_IN_PROGRESS);
         }
-        return deserialize(existing.getResponseBody(), responseType);
-    }
-
-    private void complete(String key, Object result) {
-        IdempotencyKey saved = repository.findByKey(key)
-                .orElseThrow(() -> new CustomException(ErrorCode.INTERNAL_SERVER_ERROR));
-        saved.complete(serialize(result));
-        repository.save(saved);
-    }
-
-    private String serialize(Object result) {
         try {
-            return objectMapper.writeValueAsString(result);
-        } catch (JsonProcessingException e) {
+            return objectMapper.readValue(claim.getResponseBody(), type);
+        } catch (JsonProcessingException ex) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }
 
-    private <T> T deserialize(String json, Class<T> type) {
+    private String fingerprint(Object request) {
         try {
-            return objectMapper.readValue(json, type);
-        } catch (JsonProcessingException e) {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(serialize(request).getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is required by the Java runtime", ex);
+        }
+    }
+
+    private String serialize(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
     }

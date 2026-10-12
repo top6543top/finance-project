@@ -1,99 +1,125 @@
 package com.trading.account.domain.idempotency;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.trading.account.AbstractIntegrationTest;
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
-import org.junit.jupiter.api.BeforeEach;
+import com.trading.account.domain.account.AccountRepository;
+import com.trading.account.domain.account.AccountService;
+import com.trading.account.domain.member.Member;
+import com.trading.account.domain.member.MemberRepository;
+import com.trading.account.domain.transaction.TransactionHistoryRepository;
+import com.trading.account.domain.transaction.TransactionService;
+import com.trading.account.domain.transaction.dto.TransactionResDto;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.*;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.catchThrowableOfType;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.*;
 
-@ExtendWith(MockitoExtension.class)
-class IdempotencyServiceTest {
+@SpringBootTest(properties = "ledger.simulated-deposits-enabled=true")
+class IdempotencyServiceTest extends AbstractIntegrationTest {
+    @Autowired IdempotencyService idempotency;
+    @Autowired IdempotencyKeyRepository keys;
+    @Autowired MemberRepository members;
+    @Autowired AccountService accounts;
+    @Autowired AccountRepository accountRepository;
+    @Autowired TransactionService transactions;
+    @Autowired TransactionHistoryRepository history;
 
-    @Mock
-    private IdempotencyKeyRepository repository;
-
-    private IdempotencyService idempotencyService;
-
-    @BeforeEach
-    void setUp() {
-        idempotencyService = new IdempotencyService(repository, new ObjectMapper());
+    record Actor(Long id, String account) {}
+    private Actor actor() {
+        Member member = members.save(new Member("Test", "idempotency@test.invalid", "test-hash"));
+        return new Actor(member.getId(), accounts.createAccount(member.getId()).accountNumber());
     }
-
-    private record Sample(String value) {
-    }
-
-    @Test
-    void 새로운_키는_action을_한_번_실행하고_결과를_저장한다() {
-        when(repository.findByKey("key-1")).thenReturn(Optional.of(new IdempotencyKey("key-1")));
-        AtomicInteger callCount = new AtomicInteger();
-
-        Sample result = idempotencyService.execute("key-1", Sample.class, () -> {
-            callCount.incrementAndGet();
-            return new Sample("hello");
-        });
-
-        assertThat(result).isEqualTo(new Sample("hello"));
-        assertThat(callCount.get()).isEqualTo(1);
-        verify(repository, times(2)).save(any(IdempotencyKey.class)); // insert(IN_PROGRESS) + complete(COMPLETED)
+    private TransactionResDto deposit(Actor actor, String key) {
+        return idempotency.execute(actor.id(), key, "DEPOSIT", List.of(actor.account(), new BigDecimal("10.00")),
+                TransactionResDto.class, claim -> transactions.deposit(actor.account(), actor.id(), BigDecimal.TEN, claim));
     }
 
     @Test
-    void 완료된_키로_재요청하면_action을_실행하지_않고_저장된_응답을_반환한다() {
-        when(repository.save(any(IdempotencyKey.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate key"));
-        IdempotencyKey completed = new IdempotencyKey("key-2");
-        completed.complete("{\"value\":\"cached\"}");
-        when(repository.findByKey("key-2")).thenReturn(Optional.of(completed));
-        AtomicInteger callCount = new AtomicInteger();
-
-        Sample result = idempotencyService.execute("key-2", Sample.class, () -> {
-            callCount.incrementAndGet();
-            return new Sample("new");
-        });
-
-        assertThat(result).isEqualTo(new Sample("cached"));
-        assertThat(callCount.get()).isZero();
+    void fiftyConcurrentSameKeyRequestsCommitOneTransactionAndReplaySameId() throws Exception {
+        Actor a = actor();
+        ExecutorService executor = Executors.newFixedThreadPool(20);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<TransactionResDto>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < 50; i++) {
+                futures.add(executor.submit(() -> {
+                    if (!start.await(30, TimeUnit.SECONDS)) throw new AssertionError("start timeout");
+                    return deposit(a, "same-key");
+                }));
+            }
+            start.countDown();
+            List<TransactionResDto> responses = new ArrayList<>();
+            for (var future : futures) responses.add(future.get(60, TimeUnit.SECONDS));
+            assertThat(responses).hasSize(50);
+            assertThat(responses).extracting(TransactionResDto::transactionId).doesNotContainNull().containsOnly(responses.get(0).transactionId());
+            assertThat(history.count()).isEqualTo(1);
+            assertThat(keys.count()).isEqualTo(1);
+            assertThat(accountRepository.findByAccountNumber(a.account()).orElseThrow().getBalance()).isEqualByComparingTo("10");
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
     }
 
     @Test
-    void 처리중인_키로_재요청하면_409로_거절한다() {
-        when(repository.save(any(IdempotencyKey.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate key"));
-        when(repository.findByKey("key-3")).thenReturn(Optional.of(new IdempotencyKey("key-3")));
-
-        CustomException e = catchThrowableOfType(
-                () -> idempotencyService.execute("key-3", Sample.class, () -> new Sample("x")),
-                CustomException.class);
-
-        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_REQUEST_IN_PROGRESS);
+    void rejectedBusinessOperationLeavesNoClaimAndCanBeRetriedAfterFunding() {
+        Actor a = actor();
+        assertThatThrownBy(() -> idempotency.execute(a.id(), "withdraw", "WITHDRAW", a.account(), TransactionResDto.class,
+                claim -> transactions.withdraw(a.account(), a.id(), BigDecimal.ONE, claim)))
+                .isInstanceOfSatisfying(CustomException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INSUFFICIENT_BALANCE));
+        assertThat(keys.count()).isZero();
+        assertThat(history.count()).isZero();
+        transactions.deposit(a.account(), a.id(), BigDecimal.TEN);
+        idempotency.execute(a.id(), "withdraw", "WITHDRAW", a.account(), TransactionResDto.class,
+                claim -> transactions.withdraw(a.account(), a.id(), BigDecimal.ONE, claim));
+        assertThat(keys.count()).isEqualTo(1);
+        assertThat(history.count()).isEqualTo(2);
+        assertThat(accountRepository.findByAccountNumber(a.account()).orElseThrow().getBalance()).isEqualByComparingTo("9");
     }
 
     @Test
-    void action이_실패하면_키를_지워서_재시도를_허용한다() {
-        IdempotencyKey inProgress = new IdempotencyKey("key-4");
-        when(repository.findByKey("key-4")).thenReturn(Optional.of(inProgress));
+    void migratedLegacyKeyCannotExecuteUnknownHistoricalRequestAgain() {
+        Actor a = actor();
+        IdempotencyKey legacy = new IdempotencyKey(0L, "legacy-key", "LEGACY", "0".repeat(64));
+        legacy.complete("{\"obsolete\":true}");
+        keys.saveAndFlush(legacy);
+        assertThatThrownBy(() -> deposit(a, "legacy-key"))
+                .isInstanceOfSatisfying(CustomException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_KEY_REUSED));
+        assertThat(history.count()).isZero();
+        assertThat(keys.count()).isEqualTo(1);
+    }
 
-        CustomException e = catchThrowableOfType(
-                () -> idempotencyService.execute("key-4", Sample.class, () -> {
-                    throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
-                }),
-                CustomException.class);
+    @Test
+    void legacyQuarantinePreservesOriginalCaseAndAccentInsensitiveAliases() {
+        Actor a = actor();
+        keys.saveAndFlush(new IdempotencyKey(0L, "Legacy-Key", "LEGACY", "0".repeat(64)));
+        keys.saveAndFlush(new IdempotencyKey(0L, "café-key", "LEGACY", "0".repeat(64)));
+        for (String alias : List.of("legacy-key", "cafe-key")) {
+            assertThatThrownBy(() -> deposit(a, alias))
+                    .isInstanceOfSatisfying(CustomException.class,
+                            ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.IDEMPOTENCY_KEY_REUSED));
+        }
+        assertThat(history.count()).isZero();
+    }
 
-        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INSUFFICIENT_BALANCE);
-        verify(repository, times(1)).delete(inProgress);
+    @Test
+    void keysAreCaseSensitiveAndOneHundredCharactersIsAccepted() {
+        Actor a = actor();
+        deposit(a, "Case-Sensitive");
+        deposit(a, "case-sensitive");
+        deposit(a, "x".repeat(100));
+        assertThat(keys.count()).isEqualTo(3);
+        assertThat(history.count()).isEqualTo(3);
+        assertThat(accountRepository.findByAccountNumber(a.account()).orElseThrow().getBalance()).isEqualByComparingTo("30");
     }
 }

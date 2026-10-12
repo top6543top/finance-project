@@ -23,7 +23,11 @@ public enum ErrorCode {
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "C013", "본인 소유의 계좌가 아닙니다."),
     IDEMPOTENCY_REQUEST_IN_PROGRESS(HttpStatus.CONFLICT, "C014", "동일한 요청이 처리 중입니다. 잠시 후 다시 시도해주세요."),
     INVALID_ACCOUNT_NUMBER(HttpStatus.BAD_REQUEST, "C015", "계좌번호 형식이 올바르지 않습니다."),
-    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "C016", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.");
+    TOO_MANY_REQUESTS(HttpStatus.TOO_MANY_REQUESTS, "C016", "요청이 너무 많습니다. 잠시 후 다시 시도해주세요."),
+    IDEMPOTENCY_KEY_REUSED(HttpStatus.CONFLICT, "C017", "이미 다른 요청에 사용된 멱등성 키입니다."),
+    BALANCE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "C018", "허용 가능한 잔액 상한을 초과합니다."),
+    SIMULATED_DEPOSIT_DISABLED(HttpStatus.FORBIDDEN, "C019", "모의 입금 기능이 비활성화되어 있습니다."),
+    RATE_LIMIT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "C020", "요청 제한 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해주세요.");
 
     private final HttpStatus status;
     private final String code;

@@ -20,7 +20,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException e) {
-        log.warn("Validation failed: {}", e.getMessage());
+        // Binding/JSON exceptions can contain passwords, tokens and complete rejected values.
+        // Keep only server-selected categories and codes; requestId is already supplied by MDC.
+        log.warn("Request rejected: code={} category=validation", ErrorCode.INVALID_INPUT_VALUE.getCode());
         Map<String, String> errors = new HashMap<>();
         e.getBindingResult().getFieldErrors()
                 .forEach(fieldError -> errors.put(fieldError.getField(), fieldError.getDefaultMessage()));
@@ -31,7 +33,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiResponse<Void>> handleNotReadable(HttpMessageNotReadableException e) {
-        log.warn("Malformed request body: {}", e.getMessage());
+        log.warn("Request rejected: code={} category=malformed_body", ErrorCode.INVALID_INPUT_VALUE.getCode());
         return ResponseEntity
                 .status(ErrorCode.INVALID_INPUT_VALUE.getStatus())
                 .body(ApiResponse.error(ErrorCode.INVALID_INPUT_VALUE));
@@ -39,7 +41,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
-        log.warn("Argument type mismatch: {}", e.getMessage());
+        log.warn("Request rejected: code={} category=type_mismatch", ErrorCode.INVALID_INPUT_VALUE.getCode());
         return ResponseEntity
                 .status(ErrorCode.INVALID_INPUT_VALUE.getStatus())
                 .body(ApiResponse.error(ErrorCode.INVALID_INPUT_VALUE));
@@ -47,7 +49,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<ApiResponse<Void>> handleMissingHeader(MissingRequestHeaderException e) {
-        log.warn("Missing required header: {}", e.getHeaderName());
+        log.warn("Request rejected: code={} category=missing_header", ErrorCode.INVALID_INPUT_VALUE.getCode());
         return ResponseEntity
                 .status(ErrorCode.INVALID_INPUT_VALUE.getStatus())
                 .body(ApiResponse.error(ErrorCode.INVALID_INPUT_VALUE));
@@ -55,7 +57,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
-        log.warn("Unsupported HTTP method: {}", e.getMessage());
+        log.warn("Request rejected: code={} category=unsupported_method", ErrorCode.METHOD_NOT_ALLOWED.getCode());
         return ResponseEntity
                 .status(ErrorCode.METHOD_NOT_ALLOWED.getStatus())
                 .body(ApiResponse.error(ErrorCode.METHOD_NOT_ALLOWED));
@@ -63,14 +65,15 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(CustomException.class)
     public ResponseEntity<ApiResponse<Void>> handleCustomException(CustomException e) {
-        log.warn("Business exception: {}", e.getMessage());
         ErrorCode errorCode = e.getErrorCode();
+        log.warn("Business request rejected: code={}", errorCode.getCode());
         return ResponseEntity.status(errorCode.getStatus()).body(ApiResponse.error(errorCode));
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception e) {
-        log.error("Unexpected error occurred", e);
+        // Throwable messages and nested causes can also contain request/SQL values.
+        log.error("Unexpected error: code={} type={}", ErrorCode.INTERNAL_SERVER_ERROR.getCode(), e.getClass().getSimpleName());
         return ResponseEntity
                 .status(ErrorCode.INTERNAL_SERVER_ERROR.getStatus())
                 .body(ApiResponse.error(ErrorCode.INTERNAL_SERVER_ERROR));

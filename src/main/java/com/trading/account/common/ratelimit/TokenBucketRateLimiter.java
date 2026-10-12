@@ -1,10 +1,12 @@
 package com.trading.account.common.ratelimit;
 
+import com.trading.account.common.exception.CustomException;
+import com.trading.account.common.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
 
-import java.time.Instant;
 import java.util.List;
 
 // Redis 하나로 여러 애플리케이션 인스턴스(k3s 파드)가 같은 버킷 상태를 공유해야 rate limit이
@@ -23,7 +25,8 @@ public class TokenBucketRateLimiter {
             local capacity = tonumber(ARGV[1])
             local refillTokens = tonumber(ARGV[2])
             local refillPeriodSeconds = tonumber(ARGV[3])
-            local now = tonumber(ARGV[4])
+            local redisTime = redis.call('TIME')
+            local now = tonumber(redisTime[1]) + tonumber(redisTime[2]) / 1000000
 
             local bucket = redis.call('HMGET', key, 'tokens', 'timestamp')
             local tokens = tonumber(bucket[1])
@@ -44,7 +47,8 @@ public class TokenBucketRateLimiter {
             end
 
             redis.call('HSET', key, 'tokens', tostring(tokens), 'timestamp', tostring(now))
-            redis.call('EXPIRE', key, refillPeriodSeconds * 2)
+            -- Expiration may reset to full only after enough time for a natural full refill.
+            redis.call('EXPIRE', key, math.max(1, math.ceil(capacity / refillTokens * refillPeriodSeconds)))
 
             return allowed
             """;
@@ -72,15 +76,18 @@ public class TokenBucketRateLimiter {
                     List.of(keyPrefix + clientKey),
                     String.valueOf(capacity),
                     String.valueOf(refillTokens),
-                    String.valueOf(refillPeriodSeconds),
-                    String.valueOf(Instant.now().toEpochMilli() / 1000.0));
-            return allowed != null && allowed == 1L;
-        } catch (Exception e) {
-            // ponytail: Redis 장애 시 fail-open(허용) — rate limiter는 보호장치이지 핵심 비즈니스
-            // 로직이 아니므로, Redis 하나가 죽었다고 전체 API를 막으면 가용성이 더 크게 깨진다.
-            // Redis 이중화나 서킷브레이커(IS-26)로 장애 자체를 줄이는 건 후속 과제.
-            log.warn("Rate limit check failed, allowing request (fail-open): {}", e.getMessage());
-            return true;
+                    String.valueOf(refillPeriodSeconds));
+            if (allowed == null) throw new CustomException(ErrorCode.RATE_LIMIT_UNAVAILABLE);
+            return allowed == 1L;
+        } catch (DataAccessException e) {
+            // Neither login nor general APIs silently lose protection during a Redis outage.
+            // Exception text can include connection credentials; keep server-selected metadata only.
+            log.warn("Rate limit unavailable: code={} type={}", ErrorCode.RATE_LIMIT_UNAVAILABLE.getCode(), e.getClass().getSimpleName());
+            throw new CustomException(ErrorCode.RATE_LIMIT_UNAVAILABLE);
         }
+    }
+
+    public int getRetryAfterSeconds() {
+        return (int) Math.max(1, Math.ceil((double) refillPeriodSeconds / refillTokens));
     }
 }

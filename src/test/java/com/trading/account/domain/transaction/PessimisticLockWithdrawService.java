@@ -11,8 +11,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 // IS-30 실험 전용: TransactionService.withdraw()와 동일한 흐름이지만 비관적 락을 쓰고
-// @Retryable이 없다 — 낙관적 락(재시도) vs 비관적 락(대기)을 같은 시나리오로 비교하기 위한
-// 테스트 전용 서비스. 프로덕션 코드(TransactionService)는 그대로 낙관적 락 유지.
+// 조건부 원자적 UPDATE와 SELECT FOR UPDATE를 같은 시나리오로 비교하기 위한
+// 테스트 전용 서비스. 프로덕션 경로의 재시도는 전체 멱등성 트랜잭션 바깥에서 수행한다.
 @Service
 @RequiredArgsConstructor
 class PessimisticLockWithdrawService {

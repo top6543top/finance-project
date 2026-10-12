@@ -1,0 +1,84 @@
+spring:
+  application:
+    name: account
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      connection-timeout: 3000
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: false
+    baseline-on-migrate: false
+    clean-disabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:6379}
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:}
+      connect-timeout: 1s
+      timeout: 1s
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
+server:
+  shutdown: graceful
+  forward-headers-strategy: none
+jwt:
+  secret: ${JWT_SECRET}
+  expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+ledger:
+  simulated-deposits-enabled: false
+app:
+  security:
+    public-docs: false
+rate-limit:
+  general:
+    capacity: ${RATE_LIMIT_CAPACITY:100}
+    refill-tokens: ${RATE_LIMIT_REFILL_TOKENS:100}
+    refill-period-seconds: ${RATE_LIMIT_REFILL_PERIOD_SECONDS:60}
+  login:
+    capacity: ${RATE_LIMIT_LOGIN_CAPACITY:10}
+    refill-tokens: ${RATE_LIMIT_LOGIN_REFILL_TOKENS:10}
+    refill-period-seconds: ${RATE_LIMIT_LOGIN_REFILL_PERIOD_SECONDS:60}
+management:
+  server:
+    port: 9090
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+        add-additional-paths: true
+      group:
+        readiness:
+          include: readinessState,db,redis
+        liveness:
+          include: livenessState
+      show-details: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+logging:
+  level:
+    org.hibernate.SQL: warn
+    org.hibernate.orm.jdbc.bind: off
+    # This logger emits raw driver messages (e.g. duplicate email/key), even at ERROR.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: off

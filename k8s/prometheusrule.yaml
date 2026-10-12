@@ -10,6 +10,38 @@ spec:
   groups:
     - name: account-service.rules
       rules:
+        - alert: AccountLedgerMismatch
+          expr: max(reconciliation_mismatches{job="account-service"}) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "원장과 잔액의 불일치가 발견됨"
+            description: "대사 run과 reconciliation_mismatch를 조사하십시오. 자동 잔액 수정은 금지합니다."
+        - alert: AccountReconciliationStale
+          expr: time() - max(reconciliation_last_completed_timestamp{job="account-service"}) > 97200 or absent(reconciliation_last_completed_timestamp{job="account-service"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "최근 27시간 동안 완료된 대사가 없거나 지표가 없음"
+            description: "스케줄러와 실행 상태를 확인하고 중단 실행은 운영 중지 절차 후 복구하십시오."
+        - alert: AccountReconciliationFailure
+          expr: max(delta(reconciliation_runs_failed{job="account-service"}[15m])) > 0 or sum(increase(reconciliation_launch_failures_total{job="account-service"}[15m])) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "대사 실행 또는 시작 실패"
+            description: "최근 실패 run과 시작 오류를 확인하십시오."
+        - alert: AccountServiceUnavailable
+          expr: up{job="account-service"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "account-service 관측 대상에 연결할 수 없음"
+            description: "앱, DB, Redis, 네트워크 및 readiness를 확인하십시오."
         - alert: AccountServiceHighErrorRate
           expr: >
             100 * sum(rate(http_server_requests_seconds_count{job="account-service",status=~"5.."}[5m]))

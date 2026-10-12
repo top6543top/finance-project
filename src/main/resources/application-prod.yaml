@@ -1,0 +1,18 @@
+# Runtime uses a DML account. Migrate separately before starting this profile.
+spring:
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      password: ${REDIS_PASSWORD}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:true}
+ledger:
+  simulated-deposits-enabled: false
+app:
+  security:
+    public-docs: false

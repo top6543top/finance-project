@@ -49,11 +49,16 @@ class TransactionServiceTest {
         return account;
     }
 
+    @org.junit.jupiter.api.BeforeEach
+    void enableSimulation() {
+        ReflectionTestUtils.setField(transactionService, "simulatedDepositsEnabled", true);
+    }
+
     @Test
     void deposit_success_increasesBalance() {
         Account account = newAccount("123-456-78903");
         when(accountService.getAccount("123-456-78903")).thenReturn(account);
-        when(accountRepository.increaseBalance(1L, BigDecimal.valueOf(500))).thenReturn(1);
+        when(accountRepository.increaseBalance(1L, new BigDecimal("500.00"))).thenReturn(1);
         when(accountRepository.findBalanceById(1L)).thenReturn(Optional.of(BigDecimal.valueOf(1500)));
         when(transactionHistoryRepository.save(any(TransactionHistory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -67,7 +72,7 @@ class TransactionServiceTest {
     void withdraw_sufficientBalance_decreasesBalance() {
         Account account = newAccount("123-456-78903");
         when(accountService.getAccount("123-456-78903")).thenReturn(account);
-        when(accountRepository.decreaseBalanceIfEnough(1L, BigDecimal.valueOf(400))).thenReturn(1);
+        when(accountRepository.decreaseBalanceIfEnough(1L, new BigDecimal("400.00"))).thenReturn(1);
         when(accountRepository.findBalanceById(1L)).thenReturn(Optional.of(BigDecimal.valueOf(600)));
         when(transactionHistoryRepository.save(any(TransactionHistory.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -81,7 +86,7 @@ class TransactionServiceTest {
     void withdraw_insufficientBalance_throwsCustomException() {
         Account account = newAccount("123-456-78903");
         when(accountService.getAccount("123-456-78903")).thenReturn(account);
-        when(accountRepository.decreaseBalanceIfEnough(1L, BigDecimal.valueOf(9999))).thenReturn(0);
+        when(accountRepository.decreaseBalanceIfEnough(1L, new BigDecimal("9999.00"))).thenReturn(0);
 
         CustomException exception = catchThrowableOfType(
                 () -> transactionService.withdraw("123-456-78903", OWNER_ID, BigDecimal.valueOf(9999)), CustomException.class);

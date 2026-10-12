@@ -38,9 +38,8 @@ public class Account {
     @Column(name = "balance", nullable = false, precision = 19, scale = 2)
     private BigDecimal balance;
 
-    // 낙관적 락 선택 이유: 계좌 하나에 동시 요청이 몰릴 빈도가 낮다고 가정,
-    // 매 요청마다 DB row lock을 거는 비관적 락보다 충돌 시에만 재시도 비용을
-    // 지불하는 쪽이 처리량에 유리함 (충돌 잦아지면 비관적 락/분산 락 재검토)
+    // 거래 서비스는 조건부 원자적 UPDATE로 최신 잔액을 확인하고 version도 증가시킨다.
+    // @Version은 엔티티 기반 갱신 경로가 오래된 잔액을 덮어쓰는 것을 방지한다.
     @Version
     private Long version;
 
@@ -59,10 +58,15 @@ public class Account {
     }
 
     public void deposit(BigDecimal amount) {
+        amount = MoneyAmount.requireValid(amount);
+        if (this.balance.add(amount).compareTo(MoneyAmount.MAX) > 0) {
+            throw new CustomException(ErrorCode.BALANCE_LIMIT_EXCEEDED);
+        }
         this.balance = this.balance.add(amount);
     }
 
     public void withdraw(BigDecimal amount) {
+        amount = MoneyAmount.requireValid(amount);
         if (this.balance.compareTo(amount) < 0) {
             throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
         }

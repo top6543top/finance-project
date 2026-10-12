@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = "ledger.simulated-deposits-enabled=true")
 class TransactionConcurrencyTest extends AbstractIntegrationTest {
 
     @Autowired
@@ -34,6 +34,9 @@ class TransactionConcurrencyTest extends AbstractIntegrationTest {
 
     @Autowired
     private MemberRepository memberRepository;
+
+    @Autowired
+    private TransactionHistoryRepository history;
 
     // IS-31: 잔액 확인과 차감을 조건부 원자적 UPDATE 한 번으로 처리한다.
     // 같은 계좌에 100개 출금 요청이 몰려도 DB가 row update를 직렬화하고, 각 UPDATE는
@@ -87,6 +90,7 @@ class TransactionConcurrencyTest extends AbstractIntegrationTest {
         assertThat(conflictCount.get()).isZero();
         assertThat(successCount.get()).isEqualTo(threadCount);
         assertThat(finalBalance).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(history.count()).isEqualTo(101);
     }
 
     // transfer()는 두 계좌(from, to)를 함께 잠그는데, A→B와 B→A가 동시에 일어나면 각자
@@ -95,7 +99,7 @@ class TransactionConcurrencyTest extends AbstractIntegrationTest {
     // 이 테스트는 그 고침이 실제로 순환 대기를 없앴는지를 검증한다:
     //   1) done.await 타임아웃 안에 전부 끝남 (데드락으로 영영 안 끝나는 상황이 아님)
     //   2) 두 계좌 잔고 합이 처음과 동일 (돈이 새거나 중복 생성되지 않음)
-    //   3) 실패는 반드시 구조화된 CONCURRENT_UPDATE_CONFLICT(재시도 소진)뿐, 원본 DB 예외 누출 없음
+    //   3) 충분한 잔액에서 100건 모두 성공하고 이력 100건과 양쪽 순변동이 정확히 일치
     @Test
     void concurrentBidirectionalTransfer_noDeadlock_balanceSumStaysConsistent() throws InterruptedException {
         Member memberA = memberRepository.save(new Member("김에이", "a@example.com", "password123!"));
@@ -114,8 +118,9 @@ class TransactionConcurrencyTest extends AbstractIntegrationTest {
         CountDownLatch done = new CountDownLatch(transfersPerDirection * 2);
         List<Throwable> unexpectedFailures = new CopyOnWriteArrayList<>();
 
-        Runnable aToB = () -> runTransfer(accountA, accountB, transferAmount, memberA.getId(), start, done, unexpectedFailures);
-        Runnable bToA = () -> runTransfer(accountB, accountA, transferAmount, memberB.getId(), start, done, unexpectedFailures);
+        AtomicInteger successes = new AtomicInteger();
+        Runnable aToB = () -> runTransfer(accountA, accountB, transferAmount, memberA.getId(), start, done, unexpectedFailures, successes);
+        Runnable bToA = () -> runTransfer(accountB, accountA, transferAmount, memberB.getId(), start, done, unexpectedFailures, successes);
         for (int i = 0; i < transfersPerDirection; i++) {
             executor.submit(aToB);
             executor.submit(bToA);
@@ -132,17 +137,20 @@ class TransactionConcurrencyTest extends AbstractIntegrationTest {
         BigDecimal balanceA = accountRepository.findByAccountNumber(accountA).orElseThrow().getBalance();
         BigDecimal balanceB = accountRepository.findByAccountNumber(accountB).orElseThrow().getBalance();
         assertThat(balanceA.add(balanceB)).isEqualByComparingTo(BigDecimal.valueOf(200_000));
+        assertThat(successes.get()).isEqualTo(100);
+        assertThat(history.count()).isEqualTo(102);
+        assertThat(balanceA).isEqualByComparingTo("100000");
+        assertThat(balanceB).isEqualByComparingTo("100000");
     }
 
     private void runTransfer(String from, String to, BigDecimal amount, Long requesterId, CountDownLatch start, CountDownLatch done,
-                              List<Throwable> unexpectedFailures) {
+                              List<Throwable> unexpectedFailures, AtomicInteger successes) {
         try {
             start.await();
             transactionService.transfer(new TransferReqDto(from, to, amount), requesterId);
+            successes.incrementAndGet();
         } catch (CustomException e) {
-            if (e.getErrorCode() != ErrorCode.CONCURRENT_UPDATE_CONFLICT) {
-                unexpectedFailures.add(e);
-            }
+            unexpectedFailures.add(e);
         } catch (Exception e) {
             unexpectedFailures.add(e);
         } finally {
