@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -52,17 +52,17 @@ class TransactionControllerTest {
 
         // idempotencyService는 이 테스트에서 검증 대상이 아니므로, 컨트롤러가 넘긴 action을
         // 그대로 한 번 실행해서 감싸기 전과 동일하게 동작하도록 스텁을 깔아둔다 (IdempotencyServiceTest에서 별도 검증)
-        lenient().when(idempotencyService.execute(anyString(), any(), any()))
-                .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(2)).get());
+        lenient().when(idempotencyService.execute(any(), anyString(), anyString(), any(), any(), any()))
+                .thenAnswer(invocation -> ((Function<?, ?>) invocation.getArgument(5)).apply(null));
     }
 
     private static final Authentication AUTH = new UsernamePasswordAuthenticationToken(1L, null);
 
     @Test
     void deposit_valid_returns200() throws Exception {
-        when(transactionService.deposit(anyString(), any(), any()))
+        when(transactionService.deposit(anyString(), any(), any(), any()))
                 .thenReturn(new TransactionResDto("123-456-78903", BigDecimal.valueOf(1500), BigDecimal.valueOf(500),
-                        TransactionType.DEPOSIT, LocalDateTime.now()));
+                        TransactionType.DEPOSIT, LocalDateTime.now(), 1L, 1L, 1L));
 
         mockMvc.perform(post("/api/accounts/123-456-78903/deposit")
                         .principal(AUTH)
@@ -94,7 +94,7 @@ class TransactionControllerTest {
 
     @Test
     void withdraw_insufficientBalance_returns409() throws Exception {
-        when(transactionService.withdraw(anyString(), any(), any()))
+        when(transactionService.withdraw(anyString(), any(), any(), any()))
                 .thenThrow(new CustomException(ErrorCode.INSUFFICIENT_BALANCE));
 
         mockMvc.perform(post("/api/accounts/123-456-78903/withdraw")

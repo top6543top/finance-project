@@ -1,13 +1,6 @@
 package com.trading.account.domain.idempotency;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EntityListeners;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
+import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -17,20 +10,32 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.LocalDateTime;
 
 @Entity
+@Table(uniqueConstraints = @UniqueConstraint(name = "uk_idempotency_actor_key", columnNames = {"actor_id", "idempotency_key"}),
+        indexes = @Index(name = "idx_idempotency_legacy", columnList = "actor_id,legacy_key"))
 @Getter
 @EntityListeners(AuditingEntityListener.class)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class IdempotencyKey {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // IDENTITY라 save() 시점에 즉시 INSERT가 나감 → 같은 키로 동시에 두 요청이 들어와도
-    // 하나만 INSERT 성공하고 나머지는 그 자리에서 DataIntegrityViolationException을 받는다
-    // (TransactionHistory와 같은 이유, TransactionService.flushBeforeHistoryInsert() 주석 참고)
-    @Column(name = "idempotency_key", nullable = false, unique = true, length = 100)
+    @Column(name = "idempotency_key", nullable = false, length = 100,
+            columnDefinition = "varchar(100) collate utf8mb4_0900_bin")
     private String key;
+
+    // Upgrade migrations preserve the original key collation here, including legacy case/accent aliases.
+    @Column(name = "legacy_key", length = 100, columnDefinition = "varchar(100) collate utf8mb4_0900_ai_ci")
+    private String legacyKey;
+
+    @Column(name = "actor_id", nullable = false)
+    private Long actorId;
+
+    @Column(name = "operation", nullable = false, length = 20)
+    private String operation;
+
+    @Column(name = "request_fingerprint", nullable = false, length = 64)
+    private String requestFingerprint;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
@@ -43,8 +48,12 @@ public class IdempotencyKey {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    public IdempotencyKey(String key) {
+    public IdempotencyKey(Long actorId, String key, String operation, String requestFingerprint) {
+        this.actorId = actorId;
         this.key = key;
+        this.legacyKey = Long.valueOf(0).equals(actorId) ? key : null;
+        this.operation = operation;
+        this.requestFingerprint = requestFingerprint;
         this.status = IdempotencyStatus.IN_PROGRESS;
     }
 

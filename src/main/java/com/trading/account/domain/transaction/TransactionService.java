@@ -2,168 +2,160 @@ package com.trading.account.domain.transaction;
 
 import com.trading.account.common.exception.CustomException;
 import com.trading.account.common.exception.ErrorCode;
-import com.trading.account.common.logging.AccountNumberMasker;
 import com.trading.account.domain.account.Account;
 import com.trading.account.domain.account.AccountRepository;
 import com.trading.account.domain.account.AccountService;
-import com.trading.account.domain.transaction.dto.TransactionHistoryResDto;
-import com.trading.account.domain.transaction.dto.TransactionResDto;
-import com.trading.account.domain.transaction.dto.TransferReqDto;
-import com.trading.account.domain.transaction.dto.TransferResDto;
+import com.trading.account.domain.account.MoneyAmount;
+import com.trading.account.domain.idempotency.IdempotencyKey;
+import com.trading.account.domain.transaction.dto.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Recover;
-import org.springframework.retry.annotation.Retryable;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Slf4j
 @Service
 @Transactional
 @RequiredArgsConstructor
 public class TransactionService {
-
-    // 낙관적 락(@Version) 충돌과, REPEATABLE_READ 하에서 동시 UPDATE가 걸릴 때
-    // MySQL이 던지는 데드락(Deadlock found ...)을 같은 정책으로 재시도한다.
-    // 두 예외 모두 Spring이 org.springframework.dao.ConcurrencyFailureException 계열로
-    // 번역해주므로 그 상위 타입 하나만 잡으면 됨. delay에 random을 줘서 재시도들이
-    // 같은 타이밍에 다시 충돌(재데드락)하지 않도록 지터를 둔다.
-    private static final int MAX_RETRY_ATTEMPTS = 5;
-
     private final AccountRepository accountRepository;
     private final TransactionHistoryRepository transactionHistoryRepository;
     private final AccountService accountService;
 
-    @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
-            backoff = @Backoff(delay = 50, multiplier = 2, random = true))
+    @Value("${ledger.simulated-deposits-enabled:false}")
+    private boolean simulatedDepositsEnabled;
+
+    // HTTP mutations join IdempotencyService's transaction. They never retry inside that transaction.
+    // Three-argument methods support internal callers; those callers own their transaction/retry boundary.
     public TransactionResDto deposit(String accountNumber, Long requesterId, BigDecimal amount) {
+        return deposit(accountNumber, requesterId, amount, null);
+    }
+
+    public TransactionResDto deposit(String accountNumber, Long requesterId, BigDecimal amount, IdempotencyKey claim) {
+        if (!simulatedDepositsEnabled) throw new CustomException(ErrorCode.SIMULATED_DEPOSIT_DISABLED);
+        amount = MoneyAmount.requireValid(amount);
         Account account = accountService.getAccount(accountNumber);
         accountService.validateOwner(account, requesterId);
         increaseBalance(account, amount);
-        TransactionHistory history = transactionHistoryRepository.save(
-                new TransactionHistory(null, account, amount, TransactionType.DEPOSIT));
-        log.info("입금 완료: account={}, amount={}", AccountNumberMasker.mask(accountNumber), amount);
-        return toTransactionResDto(account, currentBalance(account), amount, TransactionType.DEPOSIT, history.getCreatedAt());
+        TransactionHistory history = record(null, account, amount, TransactionType.DEPOSIT, requesterId, claim);
+        return toResponse(account, amount, history);
     }
 
-    @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
-            backoff = @Backoff(delay = 50, multiplier = 2, random = true))
     public TransactionResDto withdraw(String accountNumber, Long requesterId, BigDecimal amount) {
+        return withdraw(accountNumber, requesterId, amount, null);
+    }
+
+    public TransactionResDto withdraw(String accountNumber, Long requesterId, BigDecimal amount, IdempotencyKey claim) {
+        amount = MoneyAmount.requireValid(amount);
         Account account = accountService.getAccount(accountNumber);
         accountService.validateOwner(account, requesterId);
         decreaseBalanceIfEnough(account, amount);
-        TransactionHistory history = transactionHistoryRepository.save(
-                new TransactionHistory(account, null, amount, TransactionType.WITHDRAW));
-        log.info("출금 완료: account={}, amount={}", AccountNumberMasker.mask(accountNumber), amount);
-        return toTransactionResDto(account, currentBalance(account), amount, TransactionType.WITHDRAW, history.getCreatedAt());
+        TransactionHistory history = record(account, null, amount, TransactionType.WITHDRAW, requesterId, claim);
+        return toResponse(account, amount, history);
     }
 
-    @Recover
-    public TransactionResDto recoverDepositOrWithdraw(ConcurrencyFailureException e, String accountNumber, Long requesterId, BigDecimal amount) {
-        log.warn("동시성 충돌로 {}회 재시도 후에도 처리 실패: account={}", MAX_RETRY_ATTEMPTS, AccountNumberMasker.mask(accountNumber));
-        throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
-    }
-
-    // Spring Retry는 retryFor에 해당 안 되는 예외라도 같은 메서드에 @Recover가 하나라도
-    // 있으면 recovery 매칭을 시도하고, 매칭되는 @Recover가 없으면 ExhaustedRetryException으로
-    // 감싸버린다. ACCOUNT_NOT_FOUND/INSUFFICIENT_BALANCE 같은 CustomException(비즈니스 예외,
-    // 재시도 대상 아님)이 그렇게 원래 에러코드를 잃고 500으로 새는 걸 막기 위해 그대로 다시 던진다.
-    @Recover
-    public TransactionResDto recoverBusinessException(CustomException e, String accountNumber, Long requesterId, BigDecimal amount) {
-        throw e;
-    }
-
-    // 이체는 두 계좌를 함께 다루는 원자적 작업이라 격리 수준을 REPEATABLE_READ로 명시:
-    // 이체 도중 다른 트랜잭션이 두 계좌 중 하나를 갱신해도 이 트랜잭션 내에서는
-    // 처음 조회한 잔고 값 기준으로 일관되게 차감/증액하도록 보장
-    @Transactional(isolation = Isolation.REPEATABLE_READ)
-    @Retryable(retryFor = ConcurrencyFailureException.class, maxAttempts = MAX_RETRY_ATTEMPTS,
-            backoff = @Backoff(delay = 50, multiplier = 2, random = true))
     public TransferResDto transfer(TransferReqDto request, Long requesterId) {
+        return transfer(request, requesterId, null);
+    }
+
+    public TransferResDto transfer(TransferReqDto request, Long requesterId, IdempotencyKey claim) {
+        BigDecimal amount = MoneyAmount.requireValid(request.amount());
+        if (request.fromAccountNumber() == null || request.toAccountNumber() == null) {
+            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        }
         if (request.fromAccountNumber().equals(request.toAccountNumber())) {
             throw new CustomException(ErrorCode.SELF_TRANSFER_NOT_ALLOWED);
         }
-
-        // A→B 이체와 B→A 이체가 동시에 일어나면 각자 "요청에 적힌 from 먼저, to 나중" 순서로
-        // X-lock을 잡으려다 서로 반대 방향으로 물려 데드락이 난다(lock ordering deadlock,
-        // flushBeforeHistoryInsert()가 고친 S-lock/X-lock 문제와는 별개의 원인).
-        // 계좌번호 문자열 비교로 항상 같은 전역 순서로 조회해서 flush 순서를 고정하면,
-        // 이체 방향과 무관하게 모든 트랜잭션이 같은 순서로만 잠그게 되어 순환 대기 자체가 사라진다.
         boolean fromFirst = request.fromAccountNumber().compareTo(request.toAccountNumber()) < 0;
         Account first = accountService.getAccount(fromFirst ? request.fromAccountNumber() : request.toAccountNumber());
         Account second = accountService.getAccount(fromFirst ? request.toAccountNumber() : request.fromAccountNumber());
         Account from = fromFirst ? first : second;
         Account to = fromFirst ? second : first;
-
-        // 이체는 출금 계좌(from)만 요청자 소유인지 검증 — 입금 계좌(to)는 상대방 소유가 당연하므로 검증 대상 아님 (IS-17)
         accountService.validateOwner(from, requesterId);
 
-
+        // Conditional UPDATE locks the row and checks its latest balance. Use one global order for both directions.
         if (fromFirst) {
-            decreaseBalanceIfEnough(from, request.amount());
-            increaseBalance(to, request.amount());
+            decreaseBalanceIfEnough(from, amount);
+            increaseBalance(to, amount);
         } else {
-            increaseBalance(to, request.amount());
-            decreaseBalanceIfEnough(from, request.amount());
+            increaseBalance(to, amount);
+            decreaseBalanceIfEnough(from, amount);
         }
 
-        TransactionHistory history = transactionHistoryRepository.save(
-                new TransactionHistory(from, to, request.amount(), TransactionType.TRANSFER));
-
-        log.info("이체 완료: from={}, to={}, amount={}", AccountNumberMasker.mask(from.getAccountNumber()), AccountNumberMasker.mask(to.getAccountNumber()), request.amount());
-        return new TransferResDto(from.getAccountNumber(), to.getAccountNumber(), request.amount(), history.getCreatedAt());
-    }
-
-    @Recover
-    public TransferResDto recoverTransfer(ConcurrencyFailureException e, TransferReqDto request, Long requesterId) {
-        log.warn("동시성 충돌로 {}회 재시도 후에도 이체 실패: from={}, to={}",
-                MAX_RETRY_ATTEMPTS, AccountNumberMasker.mask(request.fromAccountNumber()), AccountNumberMasker.mask(request.toAccountNumber()));
-        throw new CustomException(ErrorCode.CONCURRENT_UPDATE_CONFLICT);
-    }
-
-    // 위 recoverBusinessException()과 같은 이유: transfer()의 SELF_TRANSFER_NOT_ALLOWED/
-    // ACCOUNT_NOT_FOUND 같은 CustomException도 재시도 대상이 아니므로 그대로 다시 던진다.
-    @Recover
-    public TransferResDto recoverTransferBusinessException(CustomException e, TransferReqDto request, Long requesterId) {
-        throw e;
+        TransactionHistory history = record(from, to, amount, TransactionType.TRANSFER, requesterId, claim);
+        return new TransferResDto(from.getAccountNumber(), to.getAccountNumber(), amount, history.getCreatedAt(),
+                history.getId(), requesterId, history.getIdempotencyId());
     }
 
     @Transactional(readOnly = true)
     public Page<TransactionHistoryResDto> getHistory(String accountNumber, Long requesterId, Pageable pageable) {
+        validatePageSize(pageable.getPageSize());
         Account account = accountService.getAccount(accountNumber);
         accountService.validateOwner(account, requesterId);
-        return transactionHistoryRepository.findByAccount(account, pageable)
-                .map(TransactionHistoryResDto::from);
+        // Fixed order is part of the API contract; client sort expressions cannot change the unique order.
+        return transactionHistoryRepository.findByAccount(account,
+                PageRequest.of(pageable.getPageNumber(), pageable.getPageSize())).map(TransactionHistoryResDto::from);
+    }
+
+    @Transactional(readOnly = true)
+    public TransactionHistoryCursorResDto getHistoryCursor(String accountNumber, Long requesterId, Long beforeId, int size) {
+        validatePageSize(size);
+        if (beforeId != null && beforeId <= 0) throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+        Account account = accountService.getAccount(accountNumber);
+        accountService.validateOwner(account, requesterId);
+        var rows = transactionHistoryRepository.findByAccountBeforeId(account, beforeId, PageRequest.of(0, size + 1));
+        boolean hasNext = rows.size() > size;
+        var items = rows.stream().limit(size).map(TransactionHistoryResDto::from).toList();
+        Long nextCursor = hasNext ? items.get(items.size() - 1).id() : null;
+        return new TransactionHistoryCursorResDto(items, nextCursor, hasNext);
+    }
+
+    private void validatePageSize(int size) {
+        if (size < 1 || size > 100) throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
     }
 
     private void increaseBalance(Account account, BigDecimal amount) {
-        int updated = accountRepository.increaseBalance(account.getId(), amount);
-        if (updated != 1) {
-            throw new CustomException(ErrorCode.ACCOUNT_NOT_FOUND);
+        if (accountRepository.increaseBalance(account.getId(), amount) != 1) {
+            throw new CustomException(ErrorCode.BALANCE_LIMIT_EXCEEDED);
         }
     }
 
     private void decreaseBalanceIfEnough(Account account, BigDecimal amount) {
-        int updated = accountRepository.decreaseBalanceIfEnough(account.getId(), amount);
-        if (updated != 1) {
+        if (accountRepository.decreaseBalanceIfEnough(account.getId(), amount) != 1) {
             throw new CustomException(ErrorCode.INSUFFICIENT_BALANCE);
         }
     }
 
-    private BigDecimal currentBalance(Account account) {
-        return accountRepository.findBalanceById(account.getId())
-                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+    private TransactionHistory record(Account from, Account to, BigDecimal amount, TransactionType type,
+                                      Long actorId, IdempotencyKey claim) {
+        TransactionHistory history = transactionHistoryRepository.save(new TransactionHistory(from, to, amount, type, actorId, claim));
+        // The durable ledger survives a process crash; operational success logs must only describe committed rows.
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            Long transactionId = history.getId();
+            Long idempotencyId = history.getIdempotencyId();
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    log.info("Transaction committed: transactionId={}, actorId={}, operation={}, idempotencyId={}",
+                            transactionId, actorId, type, idempotencyId);
+                }
+            });
+        }
+        return history;
     }
 
-    private TransactionResDto toTransactionResDto(Account account, BigDecimal balance, BigDecimal amount, TransactionType type, LocalDateTime createdAt) {
-        return new TransactionResDto(account.getAccountNumber(), balance, amount, type, createdAt);
+    private TransactionResDto toResponse(Account account, BigDecimal amount, TransactionHistory history) {
+        BigDecimal balance = accountRepository.findBalanceById(account.getId())
+                .orElseThrow(() -> new CustomException(ErrorCode.ACCOUNT_NOT_FOUND));
+        return new TransactionResDto(account.getAccountNumber(), balance, amount, history.getType(), history.getCreatedAt(),
+                history.getId(), history.getActorId(), history.getIdempotencyId());
     }
 }

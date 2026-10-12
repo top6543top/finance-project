@@ -24,8 +24,15 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             set a.balance = a.balance + :amount,
                 a.version = a.version + 1
             where a.id = :accountId
+              and a.balance <= :maximumBalance - :amount
             """)
-    int increaseBalance(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
+    int increaseBalanceWithinLimit(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount,
+                                   @Param("maximumBalance") BigDecimal maximumBalance);
+
+    default int increaseBalance(Long accountId, BigDecimal amount) {
+        // A BigDecimal bind avoids Hibernate interpreting a large decimal query literal as a floating-point value.
+        return increaseBalanceWithinLimit(accountId, amount, MoneyAmount.MAX);
+    }
 
     @Modifying(flushAutomatically = true)
     @Query("""
