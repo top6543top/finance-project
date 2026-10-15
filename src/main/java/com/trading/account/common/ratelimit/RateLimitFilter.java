@@ -67,8 +67,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.equals("/actuator/health") || path.equals("/actuator/prometheus"));
     }
 
-    // Forwarded headers are untrusted input. Keep server.forward-headers-strategy=none:
-    // NAT/proxy clients deliberately share a bucket until a trusted edge enforces per-client limits.
+    // Never parse forwarded headers here. In prod, Tomcat RemoteIpValve rewrites remoteAddr only when the
+    // TCP peer is a trusted proxy (application-prod.yaml); elsewhere headers are ignored (strategy=none).
     String resolveClientKey(HttpServletRequest request) {
         return request.getRemoteAddr();
     }
