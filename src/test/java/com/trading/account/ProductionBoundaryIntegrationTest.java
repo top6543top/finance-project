@@ -28,7 +28,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "spring.config.import=classpath:application-common.yaml",
         "spring.flyway.enabled=true", // Install the disposable test DB using the same release migrations.
         "management.server.port=0", "reconciliation.scheduler.enabled=false",
-        "spring.data.redis.ssl.enabled=false", "ledger.simulated-deposits-enabled=false"
+        "spring.data.redis.ssl.enabled=false", "ledger.simulated-deposits-enabled=false",
+        // This inline import outranks application-prod.yaml, unlike the real load order (ProdConfigPrecedenceTest).
+        "server.forward-headers-strategy=native"
 })
 class ProductionBoundaryIntegrationTest extends AbstractIntegrationTest {
     @DynamicPropertySource
@@ -40,6 +42,11 @@ class ProductionBoundaryIntegrationTest extends AbstractIntegrationTest {
         registry.add("REDIS_PORT", () -> REDIS.getMappedPort(6379));
         registry.add("REDIS_PASSWORD", () -> "");
         registry.add("JWT_SECRET", () -> "test-only-jwt-secret-key-not-for-production-32bytes-min");
+        // TestRestTemplate connects from loopback, so it plays the trusted Traefik hop.
+        registry.add("TRUSTED_PROXIES", () -> "127\\.0\\.0\\.1|0:0:0:0:0:0:0:1");
+        registry.add("rate-limit.login.capacity", () -> 1);
+        registry.add("rate-limit.login.refill-tokens", () -> 1);
+        registry.add("rate-limit.login.refill-period-seconds", () -> 3600);
     }
     @Autowired TestRestTemplate http;
     @Autowired MemberRepository members;
@@ -81,6 +88,25 @@ class ProductionBoundaryIntegrationTest extends AbstractIntegrationTest {
             root.detachAppender(logs);
             logs.stop();
         }
+    }
+
+    @Test
+    void loginBudgetFollowsTheClientIpAppendedByTrustedProxy() {
+        String client = "203.0.113.10";
+        assertThat(loginVia(client)).isNotEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(loginVia(client)).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        // A forged left-most value cannot buy a fresh bucket: the valve reads right-to-left.
+        assertThat(loginVia("198.51.100.1, " + client)).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+        assertThat(loginVia("198.51.100.250")).isNotEqualTo(HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    private HttpStatusCode loginVia(String forwardedFor) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-Forwarded-For", forwardedFor);
+        return http.postForEntity("/api/auth/login",
+                new HttpEntity<>("{\"email\":\"nobody@example.invalid\",\"password\":\"wrong-password\"}", headers),
+                String.class).getStatusCode();
     }
 
     @Test

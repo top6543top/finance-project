@@ -12,9 +12,12 @@
 
 ## 2. 요청 제한의 신뢰 기준
 
-애플리케이션은 `X-Forwarded-For`나 `Forwarded`를 Redis 키로 쓰지 않는다. `request.getRemoteAddr()`로 확인한 연결 주소만 사용한다. 동일 연결 주소가 헤더 문자열을 바꿔도 동일한 로그인 버킷을 소비한다. 이 전제는 `server.forward-headers-strategy=none`과 함께 유지해야 한다.
+애플리케이션 코드는 `X-Forwarded-For`나 `Forwarded`를 직접 파싱하지 않고 `request.getRemoteAddr()`만 Redis 키로 쓴다. 이 주소를 누가 정하는지는 프로필이 결정한다.
 
-이는 공유 NAT나 인그레스 뒤의 여러 사용자가 한 버킷을 공유한다는 뜻이다. 특히 인그레스 주소만 보이는 배포에서 기본 로그인 한도를 그대로 적용하면 정상 사용자가 함께 제한될 수 있다. 운영에서는 실제 연결 주소를 관찰해 용량을 정하고, 신뢰할 수 있는 경계 프록시에서 클라이언트별 제한을 추가해야 한다. 원본 헤더를 다시 신뢰하는 설정 변경은 해결책이 아니다. 계정별 로그인 제한, 점진적 지연, MFA는 별도 개선 범위다.
+- 기본(dev·test): `server.forward-headers-strategy=none`. 전달 헤더를 무시하므로 헤더 문자열을 바꿔도 같은 연결 주소의 버킷을 소비한다.
+- prod: `native` + `server.tomcat.remoteip.internal-proxies=${TRUSTED_PROXIES}`. TCP 상대가 신뢰 프록시(Traefik)일 때만 Tomcat `RemoteIpValve`가 `X-Forwarded-For`를 **오른쪽부터** 읽어, 신뢰 프록시가 아닌 첫 주소를 `remoteAddr`로 쓴다. 프록시는 받은 값 뒤에 자기가 본 주소를 붙이므로, 클라이언트가 왼쪽에 넣은 위조값은 선택되지 않는다. 신뢰하지 않는 상대가 보낸 헤더는 무시된다.
+
+`TRUSTED_PROXIES`는 기본값이 없어 누락 시 기동이 실패한다. 배포값은 k3s 기본 Pod CIDR(`10.42.0.0/16`)이고, 앱 포트 8080은 NetworkPolicy로 Traefik만 접근할 수 있어 이 대역이 곧 Traefik이다. 실제 클러스터 CIDR과, Traefik Service의 `externalTrafficPolicy: Local` 여부를 확인해야 한다(`Cluster`면 SNAT로 노드 주소가 클라이언트로 보여 다시 버킷을 공유한다). 공유 NAT 뒤 사용자는 여전히 한 버킷을 공유한다. 계정별 로그인 제한, 점진적 지연, MFA는 별도 개선 범위다.
 
 로그인과 일반 API의 버킷은 계속 분리된다. Redis가 실패하면 두 종류 모두 무제한 허용 대신 `503 / C020`과 `Retry-After: 1`을 반환한다. 토큰이 소진된 정상 제한은 `429 / C016`이며, 한 토큰이 충전되는 시간에 맞춘 `Retry-After`를 반환한다. 이 정책은 보안 보호를 유지하는 대신 Redis 장애 때 일반 API 가용성도 낮춘다. 제한을 우회하는 로컬 fallback은 추가하지 않았다.
 
@@ -38,7 +41,8 @@ JWT는 서명, 만료, 사용자 ID를 한 번에 검사한다. 만료 없는 �
 
 | 설정 | 동작 |
 | --- | --- |
-| `server.forward-headers-strategy=none` | 전달 헤더로 연결 주소를 재작성하지 않음 |
+| `server.forward-headers-strategy=none` | 기본값. 전달 헤더로 연결 주소를 재작성하지 않음 |
+| `server.forward-headers-strategy=native` (prod) | `TRUSTED_PROXIES`에 맞는 상대의 `X-Forwarded-For`만 오른쪽부터 반영 |
 | `app.security.public-docs=false` | 기본값. API 문서 익명 접근 차단 |
 | `app.security.public-docs=true` | 개발 환경에서 API 문서 GET 공개 |
 | `management.server.port=9090` | 별도 관리 포트. 메트릭 허용은 실제 로컬 포트도 검사 |

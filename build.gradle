@@ -17,6 +17,10 @@ repositories {
 	mavenCentral()
 }
 
+// Boot 3.4.1 BOM의 Testcontainers 1.20.x는 Docker API 1.32 고정이라 Docker 29+(GitHub ubuntu-26.04 러너)가 거절함.
+// 1.21.4부터 API 버전 협상. Boot 업그레이드 시 제거.
+ext['testcontainers.version'] = '1.21.4'
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'

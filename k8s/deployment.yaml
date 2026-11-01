@@ -42,6 +42,11 @@ spec:
               value: prod
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=60 -Xss512k"
+            # k3s 기본 Pod CIDR(10.42.0.0/16). 8080은 NetworkPolicy로 Traefik만 접근 가능하므로 이 대역 = Traefik.
+            # 클러스터 확인: kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
+            # Traefik Service가 externalTrafficPolicy: Cluster면 SNAT로 노드 IP가 찍힌다 → Local 필요.
+            - name: TRUSTED_PROXIES
+              value: '10\.42\.\d{1,3}\.\d{1,3}'
           envFrom:
             - secretRef:
                 name: account-runtime-secret
